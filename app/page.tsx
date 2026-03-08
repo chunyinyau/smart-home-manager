@@ -8,6 +8,7 @@ import {
   ChevronRight, Copy, FileText, CheckCircle2,
   AlertTriangle, Clock, Play, Download
 } from 'lucide-react';
+import SpatialEnergyPanel from '@/components/SpatialEnergyPanel';
 
 interface Budget {
   cap: number;
@@ -225,7 +226,7 @@ export default function App() {
           <div className="flex items-center text-sm font-medium text-gray-600 cursor-pointer">
             <div className="flex items-center gap-2 border border-gray-200 px-3 py-1.5 rounded-md hover:bg-gray-50 transition-colors">
               <span className="w-5 h-5 bg-gray-100 border border-gray-200 rounded-full flex items-center justify-center text-xs">E</span>
-              Elroy's Team
+              Elroy&apos;s Team
               <span className="bg-gray-100 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold text-gray-500">Free</span>
             </div>
             <ChevronRight className="w-4 h-4 mx-2 text-gray-400" />
@@ -276,22 +277,35 @@ export default function App() {
             />
             <MetricCard value={`$${budget.cap}`} label="Total Cap Limit" timeframe="Monthly" />
           </div>
+          <SpatialEnergyPanel />
         </div>
       </main>
     </div>
   );
 }
 
-function NavItem({ icon, label, active, hasChevron }: { icon: React.ReactElement; label: string; active: boolean; hasChevron?: boolean }) {
+function NavItem({
+  icon,
+  label,
+  active = false,
+  hasChevron,
+  href = "#",
+}: {
+  icon: React.ReactElement<{ className?: string }>;
+  label: string;
+  active?: boolean;
+  hasChevron?: boolean;
+  href?: string;
+}) {
   return (
     <a
-      href="#"
+      href={href}
       className={`flex items-center justify-between px-3 py-2 rounded-md text-[14px] font-medium transition-colors ${
         active ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
       }`}
     >
       <div className="flex items-center gap-3">
-        {React.cloneElement(icon, { className: active ? 'text-blue-600' : 'text-gray-400' } as any)}
+        {React.cloneElement(icon, { className: active ? 'text-blue-600' : 'text-gray-400' })}
         {label}
       </div>
       {hasChevron && <ChevronDown className="w-4 h-4 text-gray-400" />}

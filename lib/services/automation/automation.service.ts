@@ -1,0 +1,41 @@
+import { getAppliances, shutdownAppliance } from "@/lib/services/appliance/appliance.service";
+import { logHistory } from "@/lib/services/history/history.service";
+import type { AutomationResult } from "./automation.types";
+
+export function shutdownLowestPriorityAppliance(uid: string): AutomationResult {
+  const appliances = getAppliances(uid)
+    .filter((appliance) => appliance.state === "ON")
+    .sort((left, right) => right.priority - left.priority);
+
+  const candidate = appliances[0] ?? null;
+  if (!candidate) {
+    return {
+      action: "none",
+      appliance: null,
+      message: "No active appliance was available for shutdown.",
+    };
+  }
+
+  const updated = shutdownAppliance(candidate.id);
+  if (!updated) {
+    return {
+      action: "none",
+      appliance: null,
+      message: "Shutdown failed because the appliance could not be found.",
+    };
+  }
+
+  logHistory(
+    uid,
+    "APPLIANCE_SHUTDOWN",
+    "automation_service",
+    `Automatically shut down ${updated.name}.`,
+    updated.id,
+  );
+
+  return {
+    action: "shutdown",
+    appliance: updated,
+    message: `${updated.name} was shut down based on lowest priority.`,
+  };
+}

@@ -40,9 +40,8 @@ export async function GET() {
       );
     }
 
-    // data.gov.sg returns cents (e.g. "26.71"), convert to SGD decimal (0.2671)
-    const rateInCents = parseFloat(domesticRow[dataGovKey]);
-    const ratePerKwh = rateInCents / 100;
+    // data.gov.sg returns cents (e.g. "26.71")
+    const centsPerKwh = parseFloat(domesticRow[dataGovKey]);
 
     // Upsert: update if month already exists, create if it doesn't
     const existingRate = await prisma.rate.findFirst({
@@ -53,12 +52,12 @@ export async function GET() {
     if (existingRate) {
       rate = await prisma.rate.update({
         where: { rate_id: existingRate.rate_id },
-        data: { rate_per_kwh: ratePerKwh },
+        data: { cents_per_kwh: centsPerKwh },
       });
     } else {
       rate = await prisma.rate.create({
         data: {
-          rate_per_kwh: ratePerKwh,
+          cents_per_kwh: centsPerKwh,
           month_year: monthYear,
         },
       });
@@ -67,7 +66,7 @@ export async function GET() {
     return NextResponse.json({
       success: true,
       message: `Rate synced for ${monthYear}`,
-      data: { ...rate, rate_per_kwh: Number(rate.rate_per_kwh) },
+      data: { ...rate, cents_per_kwh: Number(rate.cents_per_kwh) },
     });
 
   } catch (error) {

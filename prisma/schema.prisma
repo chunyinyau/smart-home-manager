@@ -9,7 +9,7 @@ datasource db {
 
 model Rate {
   rate_id        Int      @id @default(autoincrement())
-  rate_per_kwh   Decimal  @db.Decimal(10, 4)
+  cents_per_kwh  Decimal  @db.Decimal(10, 4)
   month_year     String   @db.VarChar(7)  // e.g. "2026-03"
   
   @@map("rates")

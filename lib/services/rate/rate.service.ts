@@ -15,6 +15,6 @@ export async function getCurrentRate() {
 
   return {
     ...rate,
-    rate_per_kwh: Number(rate.rate_per_kwh),
+    cents_per_kwh: Number(rate.cents_per_kwh),
   };
 }

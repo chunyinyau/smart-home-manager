@@ -5,12 +5,12 @@ const prisma = new PrismaClient()
 async function main() {
   const rate = await prisma.rate.create({
     data: {
-      rate_per_kwh: 0.2671,
+      cents_per_kwh: 26.71,
       month_year: '2026-03',
     },
   })
   
-  console.log(`Successfully seeded the 2026 Database Rate: $${rate.rate_per_kwh}/kWh`)
+  console.log(`Successfully seeded the 2026 Database Rate: ${rate.cents_per_kwh} Cents/kWh`)
 }
 
 main()

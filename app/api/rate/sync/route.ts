@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/clients/prisma";
+import { prisma } from "@/lib/clients/rate";
 
 const DATA_GOV_URL =
   "https://data.gov.sg/api/action/datastore_search?resource_id=d_61eac3cdb086814af485dcc682b75ae9";

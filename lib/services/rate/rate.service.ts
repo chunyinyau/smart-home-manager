@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/clients/prisma";
+import { prisma } from "@/lib/clients/rate";
 
 export async function getCurrentRate() {
   const today = new Date();

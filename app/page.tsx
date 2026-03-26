@@ -6,7 +6,7 @@ import {
   Activity, Layers, Wrench, ShieldCheck, Settings,
   MessageSquare, Sun, Moon, Book, ChevronDown,
   ChevronRight, Copy, FileText, CheckCircle2,
-  AlertTriangle, Clock, Play, Download
+  AlertTriangle, Clock, Play, Download, Zap
 } from 'lucide-react';
 import SpatialEnergyPanel from '@/components/SpatialEnergyPanel';
 
@@ -74,8 +74,19 @@ export default function App() {
   const [appliances, setAppliances] = useState<Appliance[]>(INITIAL_APPLIANCES);
   const [alerts, setAlerts] = useState<Alert[]>(INITIAL_ALERTS);
   const [rescueStage, setRescueStage] = useState<number>(0);
+  const [currentRate, setCurrentRate] = useState<number | null>(null);
 
   useEffect(() => {
+    // Fetch live electricity rate from our new backend
+    fetch('/api/rate')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.data) {
+          setCurrentRate(data.data.cents_per_kwh || null);
+        }
+      })
+      .catch(console.error);
+
     const timer = setInterval(() => {
       setAlerts((currentAlerts) =>
         currentAlerts.map((alert) => {
@@ -237,6 +248,17 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-4">
+            {/* Live Electricity Rate Indicator */}
+            <div className="flex items-center gap-2 border border-emerald-200 bg-emerald-50 px-3 py-1.5 rounded-md shadow-sm">
+              <Zap size={15} className="text-emerald-600" />
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold uppercase text-emerald-600 leading-none">Live SP Tariff</span>
+                <span className="text-sm font-semibold text-emerald-700 leading-none mt-0.5">
+                  {currentRate ? `${currentRate}¢ / kWh` : 'Loading...'}
+                </span>
+              </div>
+            </div>
+
             <div className="flex items-center bg-gray-100 rounded-full p-1 border border-gray-200">
               <button className="p-1 rounded-full bg-white shadow-sm text-gray-800">
                 <Sun size={14} />

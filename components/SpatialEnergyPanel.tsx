@@ -13,6 +13,7 @@ import {
   Tv,
   Wind,
   Zap,
+  Refrigerator,
 } from "lucide-react";
 
 type DeviceIcon = React.ComponentType<{ size?: number; color?: string }>;
@@ -80,15 +81,15 @@ const APPLIANCES: Appliance[] = [
     hoverBox: "480,160 620,160 620,330 480,330",
   },
   {
-    id: "remote",
-    name: "Media Remote",
-    room: "Bedroom",
-    icon: Smartphone,
+    id: "fridge",
+    name: "Kitchen Fridge",
+    room: "Kitchen",
+    icon: Refrigerator,
     status: "online",
-    stats: { usageKwh: 2.1, cost: 0.58, hoursActive: 24, trend: [1, 2, 0, 3, 5, 1, 2] },
-    nodePos: { cx: 720, cy: 435 },
-    linePoints: "485,435 720,435",
-    hoverBox: "450,400 520,400 520,470 450,470",
+    stats: { usageKwh: 45.0, cost: 12.02, hoursActive: 720, trend: [45, 46, 44, 45, 45, 44, 45] },
+    nodePos: { cx: 750, cy: 120 },
+    linePoints: "630,250 750,120",
+    hoverBox: "600,220 690,220 690,420 600,420",
   },
 ];
 
@@ -272,16 +273,6 @@ export default function SpatialEnergyPanel() {
               )}
             </g>
 
-            <g filter={activeApplianceId === "remote" ? "url(#layoutActiveGlow)" : undefined} className="transition-all duration-300">
-              <polygon points="465,425 485,435 495,430 475,420" fill="#1e293b" />
-              <polygon points="485,435 495,430 495,434 485,439" fill="#0f172a" />
-              <polygon points="465,425 485,435 485,439 465,429" fill="#334155" />
-              <circle cx="475" cy="425" r="1.5" fill="#ef4444" />
-              <circle cx="482" cy="428" r="1.5" fill="#cbd5e1" />
-              <circle cx="487" cy="431" r="1.5" fill="#cbd5e1" />
-              <circle cx="478" cy="430" r="2.5" fill="#38bdf8" />
-            </g>
-
             <g filter={activeApplianceId === "lights" ? "url(#layoutActiveGlow)" : undefined} className="transition-all duration-300">
               {APPLIANCES.find((item) => item.id === "lights")?.status === "online" && (
                 <polygon points="380,130 420,130 500,400 300,400" fill="url(#layoutLightBeam)" pointerEvents="none" />
@@ -293,6 +284,14 @@ export default function SpatialEnergyPanel() {
               {APPLIANCES.find((item) => item.id === "lights")?.status === "online" && (
                 <ellipse cx="400" cy="110" rx="15" ry="8" fill="#fef08a" style={{ filter: "blur(3px)" }} />
               )}
+            </g>
+
+            <g filter={activeApplianceId === "fridge" ? "url(#layoutActiveGlow)" : undefined} className="transition-all duration-300">
+              <polygon points="640,230 680,250 650,265 610,245" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="1" />
+              <polygon points="640,370 610,385 610,245 640,230" fill="#94a3b8" />
+              <polygon points="610,385 650,405 650,265 610,245" fill="#cbd5e1" />
+              <line x1="610" y1="315" x2="650" y2="335" stroke="#94a3b8" strokeWidth="2" />
+              <line x1="640" y1="270" x2="640" y2="300" stroke="#f1f5f9" strokeWidth="2.5" strokeLinecap="round" />
             </g>
 
             <g id="Interactive-Hitboxes" fill="transparent" className="cursor-pointer">

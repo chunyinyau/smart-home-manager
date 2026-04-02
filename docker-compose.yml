@@ -1,6 +1,17 @@
-version: '3.8'
-
 services:
+  # 0. RabbitMQ Broker (Ports 5672 and 15672 on host)
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    restart: always
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
   # 1. Rate Database Component (Port 33061 on host)
   rate_db:
     image: mysql:8.0
@@ -47,6 +58,28 @@ services:
     depends_on:
       - bill_db
 
+  # 5. Budget Database Component (Port 33063 on host)
+  budget_db:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_DATABASE: budget_db
+      MYSQL_ROOT_PASSWORD: budget_root_password
+    ports:
+      - "33063:3306"
+    volumes:
+      - budget_db_data:/var/lib/mysql
+
+  # 6. Budget API Component (Port 5004 on host)
+  budget_service:
+    build: ./budget-service
+    restart: always
+    ports:
+      - "5004:5004"
+    environment:
+      - DATABASE_URL=mysql+pymysql://root:budget_root_password@budget_db:3306/budget_db
+    depends_on:
+      - budget_db
   # 5. Appliance Database Component (Port 33063 on host)
   appliance_db:
     image: mysql:8.0
@@ -55,7 +88,7 @@ services:
       MYSQL_DATABASE: appliance_db
       MYSQL_ROOT_PASSWORD: appliance_root_password
     ports:
-      - "33063:3306"
+      - "33064:3306"
     volumes:
       - appliance_db_data:/var/lib/mysql
 
@@ -77,6 +110,8 @@ services:
       - ./appliance-service/data:/app/data
 
 volumes:
+  rabbitmq_data:
   rate_db_data:
   bill_db_data:
+  budget_db_data:
   appliance_db_data:

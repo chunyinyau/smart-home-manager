@@ -1,27 +1,36 @@
 import { DEMO_UID } from "@/lib/shared/constants";
-import type { HistoryRecord } from "./history.types";
+import type { HistoryLogEvent, HistoryRecord } from "./history.types";
 
 const historyLog: HistoryRecord[] = [
   {
-    id: "log_1",
-    uid: DEMO_UID,
-    eventType: "OCR_UPDATE",
-    eventSource: "system",
+    log_id: 1,
+    user_id: DEMO_UID,
     message: "Meter reading extracted and usage refreshed.",
-    createdAt: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
+    occurred_at: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
   },
 ];
 
-export function listHistoryByUser(uid: string) {
-  return historyLog.filter((entry) => entry.uid === uid);
+let nextLogId = historyLog.length + 1;
+
+export function listHistoryByUser(userId: string) {
+  return historyLog
+    .filter((entry) => entry.user_id === userId)
+    .sort(
+      (left, right) =>
+        new Date(right.occurred_at).getTime() -
+        new Date(left.occurred_at).getTime(),
+    )
+    .map((entry) => ({ ...entry }));
 }
 
-export function addHistoryEntry(entry: Omit<HistoryRecord, "id" | "createdAt">) {
+export function appendHistoryEntry(event: HistoryLogEvent) {
   const record: HistoryRecord = {
-    ...entry,
-    id: `log_${historyLog.length + 1}`,
-    createdAt: new Date().toISOString(),
+    log_id: nextLogId,
+    user_id: event.user_id,
+    message: event.message,
+    occurred_at: event.occurred_at ?? new Date().toISOString(),
   };
-  historyLog.unshift(record);
-  return record;
+  nextLogId += 1;
+  historyLog.push(record);
+  return { ...record };
 }

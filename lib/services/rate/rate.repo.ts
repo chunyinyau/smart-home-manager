@@ -1,18 +1,11 @@
-import type { RateRecord } from "./rate.types";
+/**
+ * Rate Repository — DEPRECATED
+ *
+ * This file previously held in-memory mock data.
+ * All rate data now lives in the MySQL database managed by
+ * the rate-service Docker container (rate-service/app.py).
+ *
+ * Use lib/services/rate/rate.service.ts to fetch rate data.
+ */
 
-let currentRate: RateRecord = {
-  id: "rate_standard",
-  pricePerKwh: 0.31,
-  tariffType: "standard",
-  effectiveFrom: new Date().toISOString(),
-  effectiveTo: null,
-};
-
-export function getCurrentRate() {
-  return currentRate;
-}
-
-export function saveCurrentRate(rate: RateRecord) {
-  currentRate = rate;
-  return currentRate;
-}
+export {}; // Keep the file to avoid import errors during migration

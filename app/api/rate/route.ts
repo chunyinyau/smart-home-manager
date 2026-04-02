@@ -1,20 +1,30 @@
 import { NextResponse } from "next/server";
-import { getCurrentRate } from "@/lib/services/rate/rate.service";
 
 export async function GET() {
   try {
-    const currentRate = await getCurrentRate();
-    
-    return NextResponse.json({
-      success: true,
-      data: currentRate
+    // 1. Point to your isolated Docker Python Flask Service explicitly via IPv4
+    const response = await fetch("http://127.0.0.1:5001/api/rate", { 
+      cache: 'no-store' 
     });
+
+    if (!response.ok) {
+        throw new Error(`Flask Service error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return NextResponse.json(data);
     
   } catch (error) {
-    console.error("RATE API ERROR:", error);
+    // 🔍 ENHANCED LOGGING FOR TERMINAL DIAGNOSIS
+    if (error instanceof Error) {
+        console.error("❌ RATE PROXY FAILURE:", error.message);
+    } else {
+        console.error("❌ RATE PROXY FAILURE: Unknown Error", error);
+    }
+    
     return NextResponse.json(
-      { success: false, error: "Failed to fetch current energy rate" },
-      { status: 500 }
+      { success: false, error: "Rate microservice is currently unreachable" }, 
+      { status: 503 }
     );
   }
 }

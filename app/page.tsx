@@ -82,7 +82,8 @@ export default function App() {
       .then(res => res.json())
       .then(data => {
         if (data.success && data.data) {
-          setCurrentRate(data.data.cents_per_kwh || null);
+          const rateData = Array.isArray(data.data) ? data.data[0] : data.data;
+          setCurrentRate(rateData?.cents_per_kwh || null);
         }
       })
       .catch(console.error);

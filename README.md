@@ -9,7 +9,7 @@ Wattch is a smart home energy management demo built with Next.js. It shows how a
 - Surfaces alerts with acknowledgement and auto-cutoff behavior.
 - Exposes API routes for budget, appliance, history, profile, rate, and forecast data.
 - Includes a Telegram orchestrator flow for handling user intents.
-- Runs the rate and appliance backends as Dockerized microservices.
+- Runs rate, appliance, budget, bill, and history as Dockerized Python microservices.
 - Uses RabbitMQ for asynchronous history log ingestion.
 
 ## Tech Stack
@@ -19,6 +19,8 @@ Wattch is a smart home energy management demo built with Next.js. It shows how a
 - TypeScript
 - Tailwind CSS 4
 - Lucide icons
+- Flask microservices
+- MySQL
 - RabbitMQ
 
 ## Project Structure
@@ -30,6 +32,7 @@ Wattch is a smart home energy management demo built with Next.js. It shows how a
 - `lib/services/*` - business logic and repository helpers
 - `lib/orchestrator/*` - Telegram intent parsing and orchestration
 - `lib/clients/*` - lightweight client stubs used by the demo
+- `history-service/` - Python Flask history microservice with RabbitMQ consumer
 
 ## Getting Started
 
@@ -78,6 +81,7 @@ The app includes the following route handlers:
 - `POST /api/appliance/telemetry/advance`
 - `POST /api/appliance/telemetry/reset`
 - `GET /api/history`
+- `POST /api/history/log`
 - `GET /api/profile`
 - `GET /api/rate`
 - `GET /api/forecast`

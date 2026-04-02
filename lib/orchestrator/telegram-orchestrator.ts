@@ -56,7 +56,7 @@ export async function handleTelegramIntent(
   }
 
   if (intent === "history") {
-    return getHistory(uid);
+    return await getHistory(uid);
   }
 
   if (intent === "profile") {

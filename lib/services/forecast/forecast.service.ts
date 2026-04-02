@@ -13,7 +13,7 @@ export async function getForecast(uid: string): Promise<ForecastRecord | null> {
   }
 
   const usage = await getUsageSummary(uid);
-  const rate = getRate();
+  const rate = await getRate();
   const prediction = await getForecastPrediction({
     baselineKwh: profile.baselineKwh,
     activeCount: usage.activeCount,

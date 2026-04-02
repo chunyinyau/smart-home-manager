@@ -71,6 +71,10 @@ The app includes the following route handlers:
 - `GET /api/appliance`
 - `POST /api/appliance/[aid]/shutdown`
 - `PATCH /api/appliance/[aid]/priority`
+- `GET /api/appliance/telemetry/status`
+- `GET /api/appliance/telemetry/current`
+- `POST /api/appliance/telemetry/advance`
+- `POST /api/appliance/telemetry/reset`
 - `GET /api/history`
 - `GET /api/profile`
 - `GET /api/rate`
@@ -81,5 +85,6 @@ The app includes the following route handlers:
 
 - The repo uses a demo user ID defined in `lib/shared/constants.ts`.
 - UI copy, budget thresholds, and appliance states are currently simulated in the client and service layer.
+- The appliance microservice replays `appliance-service/data/appliance_energy_data.csv` and advances one row every `APPLIANCE_REPLAY_INTERVAL_SECONDS` seconds.
 - `app/layout.tsx` still contains the default generated metadata, so you may want to customize the page title and description next.
 

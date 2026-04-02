@@ -77,7 +77,7 @@ services:
       MYSQL_DATABASE: appliance_db
       MYSQL_ROOT_PASSWORD: appliance_root_password
     ports:
-      - "33063:3306"
+      - "33064:3306"
     volumes:
       - appliance_db_data:/var/lib/mysql
 

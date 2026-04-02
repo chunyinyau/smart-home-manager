@@ -24,5 +24,29 @@ services:
     depends_on:
       - rate_db
 
+  # 3. Bill Database Component (Port 33062 on host)
+  bill_db:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_DATABASE: bill_db
+      MYSQL_ROOT_PASSWORD: bill_root_password
+    ports:
+      - "33062:3306"
+    volumes:
+      - bill_db_data:/var/lib/mysql
+
+  # 4. Bill API Component (Port 5002 on host)
+  bill_service:
+    build: ./bill-service
+    restart: always
+    ports:
+      - "5002:5002"
+    environment:
+      - DATABASE_URL=mysql+pymysql://root:bill_root_password@bill_db:3306/bill_db
+    depends_on:
+      - bill_db
+
 volumes:
   rate_db_data:
+  bill_db_data:

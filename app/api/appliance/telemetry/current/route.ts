@@ -1,18 +1,28 @@
 import { NextResponse } from "next/server";
-
-const TELEMETRY_SERVICE_URL = "http://127.0.0.1:5002";
+import {
+  extractErrorMessage,
+  fetchService,
+  readJsonBody,
+} from "@/lib/clients/service-discovery";
 
 export async function GET() {
   try {
-    const response = await fetch(`${TELEMETRY_SERVICE_URL}/api/appliance/telemetry/current`, {
-      cache: "no-store",
-    });
+    const response = await fetchService("appliance", "/api/appliance/telemetry/current");
+    const payload = await readJsonBody<Record<string, unknown>>(response);
 
     if (!response.ok) {
-      throw new Error(`Telemetry service error: ${response.status}`);
+      return NextResponse.json(
+        {
+          error: extractErrorMessage(
+            payload,
+            `Telemetry service returned HTTP ${response.status}`,
+          ),
+        },
+        { status: response.status },
+      );
     }
 
-    return NextResponse.json(await response.json());
+    return NextResponse.json(payload ?? {});
   } catch (error) {
     console.error("TELEMETRY CURRENT FAILURE:", error);
     return NextResponse.json(

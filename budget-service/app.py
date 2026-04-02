@@ -7,11 +7,32 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from sqlalchemy.exc import OperationalError
 
+
+def get_cors_origins():
+    configured = [
+        origin.strip()
+        for origin in os.getenv("CORS_ORIGINS", "").split(",")
+        if origin.strip()
+    ]
+    if configured:
+        return configured
+
+    return ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+
+def is_debug_enabled():
+    return os.getenv("FLASK_DEBUG", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
 # ==========================================
 # Flask App Configuration
 # ==========================================
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/api/*": {"origins": get_cors_origins()}})
 
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
     'DATABASE_URL', 'sqlite:///local_budget.db'
@@ -81,12 +102,23 @@ def get_budget_by_user(user_id):
 def create_budget():
     """Create a new budget record for a user."""
     try:
-        body = request.get_json()
-        if not body or 'user_id' not in body:
+        body = request.get_json(silent=True) or {}
+        if 'user_id' not in body:
             return jsonify({"success": False, "error": "user_id is required"}), 400
 
+        try:
+            user_id = int(body['user_id'])
+            if user_id <= 0:
+                raise ValueError()
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "user_id must be a positive integer"}), 400
+
+        existing = Budget.query.filter_by(user_id=user_id).first()
+        if existing:
+            return jsonify({"success": False, "error": "Budget already exists for this user"}), 409
+
         new_budget = Budget(
-            user_id    = body['user_id'],
+            user_id    = user_id,
             budget_cap = body.get('budget_cap', 100.00),
             cum_bill   = body.get('cum_bill',   0.00),
         )
@@ -105,7 +137,10 @@ def update_budget(budget_id):
         if not budget:
             return jsonify({"success": False, "error": "Budget not found"}), 404
 
-        body = request.get_json()
+        body = request.get_json(silent=True) or {}
+        if not body:
+            return jsonify({"success": False, "error": "No fields provided for update"}), 400
+
         if 'budget_cap' in body:
             budget.budget_cap = body['budget_cap']
         if 'cum_bill' in body:
@@ -114,6 +149,38 @@ def update_budget(budget_id):
         db.session.commit()
         return jsonify({"success": True, "data": budget.to_dict()}), 200
     except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/budget/<int:user_id>/cap', methods=['PATCH'])
+def update_budget_cap(user_id):
+    """Update budget_cap using user_id as the canonical identifier."""
+    try:
+        if user_id <= 0:
+            return jsonify({"success": False, "error": "user_id must be a positive integer"}), 400
+
+        body = request.get_json(silent=True) or {}
+        if 'budget_cap' not in body:
+            return jsonify({"success": False, "error": "budget_cap is required"}), 400
+
+        try:
+            budget_cap = float(body['budget_cap'])
+            if budget_cap <= 0:
+                raise ValueError()
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "budget_cap must be a positive number"}), 400
+
+        budget = Budget.query.filter_by(user_id=user_id).first()
+        if not budget:
+            return jsonify({"success": False, "error": "No budget found for this user"}), 404
+
+        budget.budget_cap = budget_cap
+        db.session.commit()
+
+        return jsonify({"success": True, "data": budget.to_dict()}), 200
+    except Exception as e:
+        db.session.rollback()
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -145,6 +212,6 @@ def wait_for_db(retries=10, delay=5):
 if __name__ == '__main__':
     if wait_for_db():
         print("Database connection established!")
-        app.run(host='0.0.0.0', port=5004, debug=True)
+        app.run(host='0.0.0.0', port=5004, debug=is_debug_enabled())
     else:
         print("Could not connect to database after retries. Exiting.")

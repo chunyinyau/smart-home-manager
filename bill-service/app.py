@@ -8,11 +8,32 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from sqlalchemy.exc import OperationalError
 
+
+def get_cors_origins():
+    configured = [
+        origin.strip()
+        for origin in os.getenv("CORS_ORIGINS", "").split(",")
+        if origin.strip()
+    ]
+    if configured:
+        return configured
+
+    return ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+
+def is_debug_enabled():
+    return os.getenv("FLASK_DEBUG", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
 # ==========================================
 # Flask App Configuration
 # ==========================================
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/api/*": {"origins": get_cors_origins()}})
 
 # Use environment variable for database connection, fallback to local sqlite for dev
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
@@ -132,6 +153,6 @@ if __name__ == '__main__':
     if wait_for_db():
         print("Database connection established!")
         # Billing service runs on port 5003
-        app.run(host='0.0.0.0', port=5003, debug=True)
+        app.run(host='0.0.0.0', port=5003, debug=is_debug_enabled())
     else:
         print("Could not connect to database after retries. Exiting.")

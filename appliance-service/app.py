@@ -15,8 +15,29 @@ DEFAULT_SEED_FILE = Path("/app/seed/appliances.json")
 DEFAULT_TELEMETRY_CSV = Path("/app/data/appliance_energy_data.csv")
 DEFAULT_TELEMETRY_STATE_FILE = Path("/app/data/appliance_telemetry_state.json")
 
+
+def get_cors_origins():
+    configured = [
+        origin.strip()
+        for origin in os.getenv("CORS_ORIGINS", "").split(",")
+        if origin.strip()
+    ]
+    if configured:
+        return configured
+
+    return ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+
+def is_debug_enabled():
+    return os.getenv("FLASK_DEBUG", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/api/*": {"origins": get_cors_origins()}})
 
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
     "DATABASE_URL", "sqlite:///appliance_local.db"
@@ -320,4 +341,9 @@ if __name__ == "__main__":
     telemetry_store.start()
 
     print("Appliance microservice is ready on port 5002!", flush=True)
-    app.run(host="0.0.0.0", port=5002, debug=True, use_reloader=False)
+    app.run(
+        host="0.0.0.0",
+        port=5002,
+        debug=is_debug_enabled(),
+        use_reloader=False,
+    )

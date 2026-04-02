@@ -15,8 +15,29 @@ DEMO_UID = "user_demo_001"
 HISTORY_EVENTS_QUEUE = os.getenv("HISTORY_EVENTS_QUEUE", "history.events.v1")
 RABBITMQ_RETRY_SECONDS = int(os.getenv("RABBITMQ_RETRY_SECONDS", "5"))
 
+
+def get_cors_origins():
+    configured = [
+        origin.strip()
+        for origin in os.getenv("CORS_ORIGINS", "").split(",")
+        if origin.strip()
+    ]
+    if configured:
+        return configured
+
+    return ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+
+def is_debug_enabled():
+    return os.getenv("FLASK_DEBUG", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/api/*": {"origins": get_cors_origins()}})
 
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
     "DATABASE_URL", "sqlite:///history_local.db"
@@ -327,6 +348,6 @@ if __name__ == "__main__":
             start_consumer_thread()
 
         print("History microservice is ready on port 5005", flush=True)
-        app.run(host="0.0.0.0", port=5005, debug=True)
+        app.run(host="0.0.0.0", port=5005, debug=is_debug_enabled())
     else:
         print("Could not connect to history database after retries. Exiting.", flush=True)

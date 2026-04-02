@@ -1,30 +1,42 @@
 import { NextResponse } from "next/server";
+import {
+  extractErrorMessage,
+  fetchService,
+  readJsonBody,
+} from "@/lib/clients/service-discovery";
 
 export async function GET() {
   try {
-    // 1. Point to your isolated Docker Python Flask Service explicitly via IPv4
-    const response = await fetch("http://127.0.0.1:5001/api/rate", { 
-      cache: 'no-store' 
-    });
+    const response = await fetchService("rate", "/api/rate");
+    const payload = await readJsonBody<Record<string, unknown>>(response);
 
     if (!response.ok) {
-        throw new Error(`Flask Service error: ${response.status}`);
+      return NextResponse.json(
+        {
+          success: false,
+          error: extractErrorMessage(
+            payload,
+            `Rate service returned HTTP ${response.status}`,
+          ),
+        },
+        { status: response.status },
+      );
     }
 
-    const data = await response.json();
-    return NextResponse.json(data);
-    
+    return NextResponse.json(payload ?? { success: true, data: [] });
   } catch (error) {
-    // ENHANCED LOGGING FOR TERMINAL DIAGNOSIS
     if (error instanceof Error) {
-      console.error("RATE PROXY FAILURE:", error.message);
+      console.error("❌ RATE PROXY FAILURE:", error.message);
     } else {
-      console.error("RATE PROXY FAILURE: Unknown Error", error);
+      console.error("❌ RATE PROXY FAILURE: Unknown Error", error);
     }
-    
+
     return NextResponse.json(
-      { success: false, error: "Rate microservice is currently unreachable" }, 
-      { status: 503 }
+      {
+        success: false,
+        error: "Rate microservice is currently unreachable",
+      },
+      { status: 503 },
     );
   }
 }

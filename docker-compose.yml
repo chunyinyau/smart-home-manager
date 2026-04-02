@@ -47,6 +47,28 @@ services:
     depends_on:
       - bill_db
 
+  # 5. Budget Database Component (Port 33063 on host)
+  budget_db:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_DATABASE: budget_db
+      MYSQL_ROOT_PASSWORD: budget_root_password
+    ports:
+      - "33063:3306"
+    volumes:
+      - budget_db_data:/var/lib/mysql
+
+  # 6. Budget API Component (Port 5004 on host)
+  budget_service:
+    build: ./budget-service
+    restart: always
+    ports:
+      - "5004:5004"
+    environment:
+      - DATABASE_URL=mysql+pymysql://root:budget_root_password@budget_db:3306/budget_db
+    depends_on:
+      - budget_db
   # 5. Appliance Database Component (Port 33063 on host)
   appliance_db:
     image: mysql:8.0
@@ -73,4 +95,5 @@ services:
 volumes:
   rate_db_data:
   bill_db_data:
+  budget_db_data:
   appliance_db_data:

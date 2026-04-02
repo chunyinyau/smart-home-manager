@@ -131,7 +131,7 @@ def wait_for_db(retries=10, delay=5):
 if __name__ == '__main__':
     if wait_for_db():
         print("Database connection established!")
-        # Billing service runs on port 5002
-        app.run(host='0.0.0.0', port=5002, debug=True)
+        # Billing service runs on port 5003
+        app.run(host='0.0.0.0', port=5003, debug=True)
     else:
         print("Could not connect to database after retries. Exiting.")

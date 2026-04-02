@@ -36,17 +36,41 @@ services:
     volumes:
       - bill_db_data:/var/lib/mysql
 
-  # 4. Bill API Component (Port 5002 on host)
+  # 4. Bill API Component (Port 5003 on host)
   bill_service:
     build: ./bill-service
     restart: always
     ports:
-      - "5002:5002"
+      - "5003:5003"
     environment:
       - DATABASE_URL=mysql+pymysql://root:bill_root_password@bill_db:3306/bill_db
     depends_on:
       - bill_db
 
+  # 5. Appliance Database Component (Port 33063 on host)
+  appliance_db:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_DATABASE: appliance_db
+      MYSQL_ROOT_PASSWORD: appliance_root_password
+    ports:
+      - "33063:3306"
+    volumes:
+      - appliance_db_data:/var/lib/mysql
+
+  # 6. Appliance API Component (Port 5002 on host)
+  appliance_service:
+    build: ./appliance-service
+    restart: always
+    ports:
+      - "5002:5002"
+    environment:
+      - DATABASE_URL=mysql+pymysql://root:appliance_root_password@appliance_db:3306/appliance_db
+    depends_on:
+      - appliance_db
+
 volumes:
   rate_db_data:
   bill_db_data:
+  appliance_db_data:

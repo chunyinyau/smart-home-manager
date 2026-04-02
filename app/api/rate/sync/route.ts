@@ -19,7 +19,7 @@ export async function GET() {
     return NextResponse.json(data);
 
   } catch (error) {
-    console.error("❌ RATE SYNC PROXY FAILURE:", error);
+    console.error("RATE SYNC PROXY FAILURE:", error);
     return NextResponse.json(
       { success: false, error: "Rate sync microservice is unreachable" },
       { status: 503 }

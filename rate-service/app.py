@@ -74,7 +74,7 @@ def get_rates():
 # ==========================================
 def wait_for_db(retries=10, delay=5):
     """Wait for MySQL to accept connections, then create tables and seed."""
-    print("⏳ Waiting for MySQL to be ready...")
+    print("Waiting for MySQL to be ready...")
     for attempt in range(1, retries + 1):
         try:
             with app.app_context():
@@ -85,13 +85,13 @@ def wait_for_db(retries=10, delay=5):
                     )
                     db.session.commit()
                     print(
-                        "🚀 Seeded default rate: 26.71 cents/kWh for 2026-03",
+                        "Seeded default rate: 26.71 cents/kWh for 2026-03",
                         flush=True,
                     )
                 return True
         except OperationalError:
             print(
-                f"🔄 DB not ready (attempt {attempt}/{retries}) "
+                f"DB not ready (attempt {attempt}/{retries}) "
                 f"— retrying in {delay}s"
             )
             time.sleep(delay)
@@ -103,7 +103,7 @@ def wait_for_db(retries=10, delay=5):
 # ==========================================
 if __name__ == '__main__':
     if wait_for_db():
-        print("✅ Database connection established!")
+        print("Database connection established!")
         app.run(host='0.0.0.0', port=5001, debug=True)
     else:
-        print("❌ Could not connect to database after retries. Exiting.")
+        print("Could not connect to database after retries. Exiting.")

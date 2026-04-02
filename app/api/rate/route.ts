@@ -15,11 +15,11 @@ export async function GET() {
     return NextResponse.json(data);
     
   } catch (error) {
-    // 🔍 ENHANCED LOGGING FOR TERMINAL DIAGNOSIS
+    // ENHANCED LOGGING FOR TERMINAL DIAGNOSIS
     if (error instanceof Error) {
-        console.error("❌ RATE PROXY FAILURE:", error.message);
+      console.error("RATE PROXY FAILURE:", error.message);
     } else {
-        console.error("❌ RATE PROXY FAILURE: Unknown Error", error);
+      console.error("RATE PROXY FAILURE: Unknown Error", error);
     }
     
     return NextResponse.json(

@@ -126,9 +126,9 @@ def load_seed_appliances() -> list[dict[str, object]]:
             payload = json.loads(seed_file.read_text(encoding="utf-8"))
             if isinstance(payload, list):
                 return payload
-            print("⚠️ APPLIANCE_SEED_FILE must contain a JSON array. Falling back to defaults.")
+            print("APPLIANCE_SEED_FILE must contain a JSON array. Falling back to defaults.")
         except Exception as error:
-            print(f"⚠️ Could not read appliance seed file: {error}. Falling back to defaults.")
+            print(f"Could not read appliance seed file: {error}. Falling back to defaults.")
 
     return default_seed_appliances()
 
@@ -319,5 +319,5 @@ if __name__ == "__main__":
 
     telemetry_store.start()
 
-    print("✅ Appliance microservice is ready on port 5002!", flush=True)
+    print("Appliance microservice is ready on port 5002!", flush=True)
     app.run(host="0.0.0.0", port=5002, debug=True, use_reloader=False)

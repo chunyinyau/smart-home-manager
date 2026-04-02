@@ -122,7 +122,7 @@ def update_budget(budget_id):
 # ==========================================
 def wait_for_db(retries=10, delay=5):
     """Wait for MySQL to accept connections, then create tables and seed."""
-    print("⏳ Waiting for MySQL to be ready...")
+    print("Waiting for MySQL to be ready...")
     for attempt in range(1, retries + 1):
         try:
             with app.app_context():
@@ -131,10 +131,10 @@ def wait_for_db(retries=10, delay=5):
                 if not Budget.query.first():
                     db.session.add(Budget(user_id=1, budget_cap=100.00, cum_bill=0.00))
                     db.session.commit()
-                    print("🚀 Seeded default budget: $100.00 cap for user_id=1", flush=True)
+                    print("Seeded default budget: $100.00 cap for user_id=1", flush=True)
                 return True
         except OperationalError:
-            print(f"🔄 DB not ready (attempt {attempt}/{retries}) — retrying in {delay}s")
+            print(f"DB not ready (attempt {attempt}/{retries}) — retrying in {delay}s")
             time.sleep(delay)
     return False
 
@@ -144,7 +144,7 @@ def wait_for_db(retries=10, delay=5):
 # ==========================================
 if __name__ == '__main__':
     if wait_for_db():
-        print("✅ Database connection established!")
+        print("Database connection established!")
         app.run(host='0.0.0.0', port=5004, debug=True)
     else:
-        print("❌ Could not connect to database after retries. Exiting.")
+        print("Could not connect to database after retries. Exiting.")

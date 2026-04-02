@@ -14,7 +14,7 @@ export async function GET() {
 
     return NextResponse.json(await response.json());
   } catch (error) {
-    console.error("❌ TELEMETRY CURRENT FAILURE:", error);
+    console.error("TELEMETRY CURRENT FAILURE:", error);
     return NextResponse.json(
       { error: "Telemetry service is currently unreachable" },
       { status: 503 },

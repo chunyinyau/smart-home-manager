@@ -19,7 +19,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(await response.json());
   } catch (error) {
-    console.error("❌ TELEMETRY ADVANCE FAILURE:", error);
+    console.error("TELEMETRY ADVANCE FAILURE:", error);
     return NextResponse.json(
       { error: "Telemetry service is currently unreachable" },
       { status: 503 },

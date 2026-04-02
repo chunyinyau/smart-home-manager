@@ -1,12 +1,19 @@
 import decimal
+import json
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 
+from telemetry_replay import TelemetryReplayStore
+
 DEMO_UID = "user_demo_001"
+DEFAULT_SEED_FILE = Path("/app/seed/appliances.json")
+DEFAULT_TELEMETRY_CSV = Path("/app/data/appliance_energy_data.csv")
+DEFAULT_TELEMETRY_STATE_FILE = Path("/app/data/appliance_telemetry_state.json")
 
 app = Flask(__name__)
 CORS(app)
@@ -17,6 +24,12 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
+
+telemetry_store = TelemetryReplayStore(
+    csv_path=os.getenv("APPLIANCE_TELEMETRY_CSV", str(DEFAULT_TELEMETRY_CSV)),
+    state_path=os.getenv("APPLIANCE_TELEMETRY_STATE_FILE", str(DEFAULT_TELEMETRY_STATE_FILE)),
+    interval_seconds=int(os.getenv("APPLIANCE_REPLAY_INTERVAL_SECONDS", "300")),
+)
 
 
 class Appliance(db.Model):
@@ -56,61 +69,92 @@ def current_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def default_seed_appliances() -> list[dict[str, object]]:
+    return [
+        {
+            "id": "app_1",
+            "uid": DEMO_UID,
+            "name": "Main AC",
+            "room": "Living Room",
+            "type": "Cooling",
+            "state": "ON",
+            "priority": 1,
+            "currentWatts": 2500,
+            "kwhUsed": 84.5,
+        },
+        {
+            "id": "app_2",
+            "uid": DEMO_UID,
+            "name": "Server Rack",
+            "room": "Study",
+            "type": "Essential",
+            "state": "ON",
+            "priority": 1,
+            "currentWatts": 800,
+            "kwhUsed": 52.3,
+        },
+        {
+            "id": "app_3",
+            "uid": DEMO_UID,
+            "name": "Entertainment Unit",
+            "room": "Living Room",
+            "type": "Non-Essential",
+            "state": "ON",
+            "priority": 3,
+            "currentWatts": 450,
+            "kwhUsed": 23.1,
+        },
+        {
+            "id": "app_4",
+            "uid": DEMO_UID,
+            "name": "Desk Lamp",
+            "room": "Study",
+            "type": "Non-Essential",
+            "state": "ON",
+            "priority": 4,
+            "currentWatts": 60,
+            "kwhUsed": 4.9,
+        },
+    ]
+
+
+def load_seed_appliances() -> list[dict[str, object]]:
+    seed_file = Path(os.getenv("APPLIANCE_SEED_FILE", str(DEFAULT_SEED_FILE)))
+
+    if seed_file.exists():
+        try:
+            payload = json.loads(seed_file.read_text(encoding="utf-8"))
+            if isinstance(payload, list):
+                return payload
+            print("⚠️ APPLIANCE_SEED_FILE must contain a JSON array. Falling back to defaults.")
+        except Exception as error:
+            print(f"⚠️ Could not read appliance seed file: {error}. Falling back to defaults.")
+
+    return default_seed_appliances()
+
+
 def seed_appliances() -> None:
     if Appliance.query.first():
         return
 
     seed_time = current_timestamp()
+    seed_records = load_seed_appliances()
     db.session.add_all(
         [
             Appliance(
-                id="app_1",
-                uid=DEMO_UID,
-                name="Main AC",
-                room="Living Room",
-                type="Cooling",
-                state="ON",
-                priority=1,
-                current_watts=2500,
-                kwh_used=84.5,
-                last_seen_at=seed_time,
-            ),
-            Appliance(
-                id="app_2",
-                uid=DEMO_UID,
-                name="Server Rack",
-                room="Study",
-                type="Essential",
-                state="ON",
-                priority=1,
-                current_watts=800,
-                kwh_used=52.3,
-                last_seen_at=seed_time,
-            ),
-            Appliance(
-                id="app_3",
-                uid=DEMO_UID,
-                name="Entertainment Unit",
-                room="Living Room",
-                type="Non-Essential",
-                state="ON",
-                priority=3,
-                current_watts=450,
-                kwh_used=23.1,
-                last_seen_at=seed_time,
-            ),
-            Appliance(
-                id="app_4",
-                uid=DEMO_UID,
-                name="Desk Lamp",
-                room="Study",
-                type="Non-Essential",
-                state="ON",
-                priority=4,
-                current_watts=60,
-                kwh_used=4.9,
-                last_seen_at=seed_time,
-            ),
+                id=str(record.get("id", "")),
+                uid=str(record.get("uid", DEMO_UID)),
+                name=str(record.get("name", "Unnamed Appliance")),
+                room=str(record.get("room", "Unknown")),
+                type=str(record.get("type", "Unknown")),
+                state=str(record.get("state", "OFF")),
+                priority=int(record.get("priority", 99)),
+                current_watts=int(record.get("currentWatts", 0)),
+                kwh_used=float(record.get("kwhUsed", 0)),
+                last_seen_at=str(record.get("lastSeenAt", seed_time)),
+            )
+            for record in seed_records
+            if str(record.get("id", "")).strip()
         ]
     )
     db.session.commit()
@@ -209,10 +253,71 @@ def appliance_summary():
     )
 
 
+@app.route("/api/appliance/telemetry/status", methods=["GET"])
+def telemetry_status():
+    return jsonify(telemetry_store.status())
+
+
+@app.route("/api/appliance/telemetry/current", methods=["GET"])
+def telemetry_current():
+    snapshot = telemetry_store.current()
+    if snapshot.row is None:
+        return jsonify({"error": "Telemetry CSV is empty."}), 404
+
+    return jsonify(
+        {
+            "index": snapshot.index,
+            "totalRows": snapshot.total_rows,
+            "completed": snapshot.completed,
+            "data": snapshot.row,
+        }
+    )
+
+
+@app.route("/api/appliance/telemetry/advance", methods=["POST"])
+def telemetry_advance():
+    payload = request.get_json(silent=True) or {}
+    try:
+        step = int(payload.get("step", 1))
+    except (TypeError, ValueError):
+        return jsonify({"error": "step must be a number."}), 400
+
+    snapshot = telemetry_store.advance(step=step)
+    if snapshot.row is None:
+        return jsonify({"error": "Telemetry CSV is empty."}), 404
+
+    return jsonify(
+        {
+            "index": snapshot.index,
+            "totalRows": snapshot.total_rows,
+            "completed": snapshot.completed,
+            "data": snapshot.row,
+        }
+    )
+
+
+@app.route("/api/appliance/telemetry/reset", methods=["POST"])
+def telemetry_reset():
+    snapshot = telemetry_store.reset()
+    if snapshot.row is None:
+        return jsonify({"error": "Telemetry CSV is empty."}), 404
+
+    return jsonify(
+        {
+            "index": snapshot.index,
+            "totalRows": snapshot.total_rows,
+            "completed": snapshot.completed,
+            "data": snapshot.row,
+        }
+    )
+
+
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
         seed_appliances()
 
+    telemetry_store.start()
+
     print("✅ Appliance microservice is ready on port 5002!", flush=True)
-    app.run(host="0.0.0.0", port=5002, debug=True)
+    app.run(host="0.0.0.0", port=5002, debug=True, use_reloader=False)

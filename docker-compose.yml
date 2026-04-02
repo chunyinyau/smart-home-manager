@@ -100,8 +100,14 @@ services:
       - "5002:5002"
     environment:
       - DATABASE_URL=mysql+pymysql://root:appliance_root_password@appliance_db:3306/appliance_db
+      - APPLIANCE_TELEMETRY_CSV=/app/data/appliance_energy_data.csv
+      - APPLIANCE_TELEMETRY_STATE_FILE=/app/data/appliance_telemetry_state.json
+      - APPLIANCE_REPLAY_INTERVAL_SECONDS=300
     depends_on:
       - appliance_db
+    volumes:
+      - ./appliance-service/seed:/app/seed:ro
+      - ./appliance-service/data:/app/data
 
 volumes:
   rabbitmq_data:

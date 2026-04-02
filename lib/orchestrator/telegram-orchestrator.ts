@@ -23,8 +23,8 @@ export async function handleTelegramIntent(
   if (intent === "status") {
     return {
       budget: getBudgetStatus(uid),
-      appliances: await getAppliances(uid),
-      rate: getRate(),
+      appliances: getAppliances(uid),
+      rate: await getRate(),
     };
   }
 
@@ -64,7 +64,7 @@ export async function handleTelegramIntent(
   }
 
   if (intent === "rate") {
-    return getRate();
+    return await getRate();
   }
 
   return { error: `Unsupported intent: ${intent}` };

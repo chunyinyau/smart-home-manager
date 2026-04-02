@@ -1,36 +1,77 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Wattch
+
+Wattch is a smart home energy management demo built with Next.js. It shows how a Telegram-style orchestration flow, appliance controls, budget tracking, and forecasting can work together in one dashboard.
+
+## What It Does
+
+- Tracks budget, projected spend, and risk level.
+- Displays appliance state and simulated shutdown actions.
+- Surfaces alerts with acknowledgement and auto-cutoff behavior.
+- Exposes API routes for budget, appliance, history, profile, rate, and forecast data.
+- Includes a Telegram orchestrator flow for handling user intents.
+
+## Tech Stack
+
+- Next.js 16
+- React 19
+- TypeScript
+- Tailwind CSS 4
+- Lucide icons
+
+## Project Structure
+
+- `app/page.tsx` - main dashboard UI
+- `app/layout.tsx` - app shell and metadata
+- `app/api/*` - route handlers for budget, forecast, appliance, history, profile, rate, and orchestrator flows
+- `components/SpatialEnergyPanel.tsx` - spatial appliance visualization
+- `lib/services/*` - business logic and repository helpers
+- `lib/orchestrator/*` - Telegram intent parsing and orchestration
+- `lib/clients/*` - lightweight client stubs used by the demo
 
 ## Getting Started
 
-First, run the development server:
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Run the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+3. Open the app:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```text
+http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Scripts
 
-## Learn More
+- `npm run dev` - start the local development server
+- `npm run build` - build the production app
+- `npm run start` - run the production build
+- `npm run lint` - run ESLint
 
-To learn more about Next.js, take a look at the following resources:
+## API Routes
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The app includes the following route handlers:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `GET /api/budget`
+- `POST /api/budget/cap`
+- `GET /api/appliance`
+- `POST /api/appliance/[aid]/shutdown`
+- `GET /api/history`
+- `GET /api/profile`
+- `GET /api/rate`
+- `GET /api/forecast`
+- `POST /api/orchestrator`
 
-## Deploy on Vercel
+## Notes
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- The repo uses a demo user ID defined in `lib/shared/constants.ts`.
+- UI copy, budget thresholds, and appliance states are currently simulated in the client and service layer.
+- `app/layout.tsx` still contains the default generated metadata, so you may want to customize the page title and description next.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.

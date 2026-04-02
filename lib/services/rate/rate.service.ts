@@ -32,3 +32,11 @@ export async function getCurrentRate() {
     month_year: rate.month_year,
   };
 }
+
+export async function getRate() {
+  const rate = await getCurrentRate();
+  return {
+    ...rate,
+    pricePerKwh: rate.cents_per_kwh / 100,
+  };
+}

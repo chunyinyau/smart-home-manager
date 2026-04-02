@@ -1,28 +1,28 @@
 import {
-  getApplianceById,
-  listAppliancesByUser,
-  updateAppliancePriority,
-  updateApplianceState,
-} from "./appliance.repo";
+  fetchAppliance,
+  fetchAppliances,
+  shutdownApplianceInService,
+  updateAppliancePriorityInService,
+} from "@/lib/clients/appliance";
 
-export function getAppliances(uid: string) {
-  return listAppliancesByUser(uid);
+export async function getAppliances(uid: string) {
+  return fetchAppliances(uid);
 }
 
-export function getAppliance(aid: string) {
-  return getApplianceById(aid);
+export async function getAppliance(aid: string) {
+  return fetchAppliance(aid);
 }
 
-export function shutdownAppliance(aid: string) {
-  return updateApplianceState(aid, "OFF", 0);
+export async function shutdownAppliance(aid: string) {
+  return shutdownApplianceInService(aid);
 }
 
-export function setAppliancePriority(aid: string, priority: number) {
-  return updateAppliancePriority(aid, priority);
+export async function setAppliancePriority(aid: string, priority: number) {
+  return updateAppliancePriorityInService(aid, priority);
 }
 
-export function getUsageSummary(uid: string) {
-  const appliances = listAppliancesByUser(uid);
+export async function getUsageSummary(uid: string) {
+  const appliances = await fetchAppliances(uid);
   const activeCount = appliances.filter((appliance) => appliance.state === "ON").length;
   const totalWatts = appliances.reduce((sum, appliance) => sum + appliance.currentWatts, 0);
   const totalKwh = appliances.reduce((sum, appliance) => sum + appliance.kwhUsed, 0);

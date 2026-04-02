@@ -23,7 +23,7 @@ export async function handleTelegramIntent(
   if (intent === "status") {
     return {
       budget: getBudgetStatus(uid),
-      appliances: getAppliances(uid),
+      appliances: await getAppliances(uid),
       rate: getRate(),
     };
   }
@@ -46,7 +46,7 @@ export async function handleTelegramIntent(
 
   if (intent === "shutdown") {
     if (params.aid) {
-      const appliance = shutdownAppliance(params.aid);
+      const appliance = await shutdownAppliance(params.aid);
       if (appliance) {
         logHistory(uid, "APPLIANCE_SHUTDOWN", "orchestrator", `User requested shutdown for ${appliance.name}.`, appliance.id);
       }

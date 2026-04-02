@@ -109,9 +109,36 @@ services:
       - ./appliance-service/seed:/app/seed:ro
       - ./appliance-service/data:/app/data
 
+  # 7. History Database Component (Port 33065 on host)
+  history_db:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_DATABASE: history_db
+      MYSQL_ROOT_PASSWORD: history_root_password
+    ports:
+      - "33065:3306"
+    volumes:
+      - history_db_data:/var/lib/mysql
+
+  # 8. History API Component (Port 5005 on host)
+  history_service:
+    build: ./history-service
+    restart: always
+    ports:
+      - "5005:5005"
+    environment:
+      - DATABASE_URL=mysql+pymysql://root:history_root_password@history_db:3306/history_db
+      - RABBITMQ_URLS=amqp://guest:guest@rabbitmq:5672
+      - HISTORY_EVENTS_QUEUE=history.events.v1
+    depends_on:
+      - history_db
+      - rabbitmq
+
 volumes:
   rabbitmq_data:
   rate_db_data:
   bill_db_data:
   budget_db_data:
   appliance_db_data:
+  history_db_data:

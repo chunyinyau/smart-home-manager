@@ -14,4 +14,5 @@ export interface HistoryLogEvent {
 export interface HistoryQueueAck {
   accepted: true;
   queued_at: string;
+  fallback?: boolean;
 }

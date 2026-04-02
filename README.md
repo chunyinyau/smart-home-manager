@@ -10,6 +10,7 @@ Wattch is a smart home energy management demo built with Next.js. It shows how a
 - Exposes API routes for budget, appliance, history, profile, rate, and forecast data.
 - Includes a Telegram orchestrator flow for handling user intents.
 - Runs the rate and appliance backends as Dockerized microservices.
+- Uses RabbitMQ for asynchronous history log ingestion.
 
 ## Tech Stack
 
@@ -18,6 +19,7 @@ Wattch is a smart home energy management demo built with Next.js. It shows how a
 - TypeScript
 - Tailwind CSS 4
 - Lucide icons
+- RabbitMQ
 
 ## Project Structure
 
@@ -37,19 +39,19 @@ Wattch is a smart home energy management demo built with Next.js. It shows how a
 npm install
 ```
 
-2. Run the development server:
+1. Run the development server:
 
 ```bash
 npm run dev
 ```
 
-3. Start the backend microservices:
+1. Start the backend microservices:
 
 ```bash
 docker compose up --build -d
 ```
 
-4. Open the app:
+1. Open the app:
 
 ```text
 http://localhost:3000
@@ -77,9 +79,15 @@ The app includes the following route handlers:
 - `GET /api/forecast`
 - `POST /api/orchestrator`
 
+## RabbitMQ (History Events)
+
+- Queue name defaults to `history.events.v1`.
+- Configure broker via `RABBITMQ_URL` (single URL) or `RABBITMQ_URLS` (comma-separated fallback URLs).
+- Optional queue override: `HISTORY_EVENTS_QUEUE`.
+- Docker compose starts RabbitMQ with management UI on `http://localhost:15672`.
+
 ## Notes
 
 - The repo uses a demo user ID defined in `lib/shared/constants.ts`.
 - UI copy, budget thresholds, and appliance states are currently simulated in the client and service layer.
 - `app/layout.tsx` still contains the default generated metadata, so you may want to customize the page title and description next.
-

@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  # 1. Rate Database Component (Port 33061 on host)
+  rate_db:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_DATABASE: rate_db
+      MYSQL_ROOT_PASSWORD: rate_root_password
+    ports:
+      - "33061:3306"
+    volumes:
+      - rate_db_data:/var/lib/mysql
+
+  # 2. Rate API Component (Port 5001 on host)
+  rate_service:
+    build: ./rate-service
+    restart: always
+    ports:
+      - "5001:5001"
+    environment:
+      - DATABASE_URL=mysql+pymysql://root:rate_root_password@rate_db:3306/rate_db
+    depends_on:
+      - rate_db
+
+volumes:
+  rate_db_data:

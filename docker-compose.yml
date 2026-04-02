@@ -1,6 +1,17 @@
-version: '3.8'
-
 services:
+  # 0. RabbitMQ Broker (Ports 5672 and 15672 on host)
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    restart: always
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
   # 1. Rate Database Component (Port 33061 on host)
   rate_db:
     image: mysql:8.0
@@ -93,6 +104,7 @@ services:
       - appliance_db
 
 volumes:
+  rabbitmq_data:
   rate_db_data:
   bill_db_data:
   budget_db_data:

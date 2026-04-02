@@ -39,7 +39,7 @@ export async function handleTelegramIntent(
 
     const budget = updateMonthlyCap(uid, params.monthlyCap);
     if (budget) {
-      logHistory(uid, "BUDGET_UPDATED", "orchestrator", `Monthly cap updated to $${params.monthlyCap}.`);
+      await logHistory(uid, `Monthly cap updated to $${params.monthlyCap}.`);
     }
     return budget;
   }
@@ -48,7 +48,7 @@ export async function handleTelegramIntent(
     if (params.aid) {
       const appliance = await shutdownAppliance(params.aid);
       if (appliance) {
-        logHistory(uid, "APPLIANCE_SHUTDOWN", "orchestrator", `User requested shutdown for ${appliance.name}.`, appliance.id);
+        await logHistory(uid, `User requested shutdown for ${appliance.name}.`);
       }
       return appliance;
     }

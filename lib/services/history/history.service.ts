@@ -1,21 +1,35 @@
-import { addHistoryEntry, listHistoryByUser } from "./history.repo";
+import { DEMO_UID } from "@/lib/shared/constants";
+import { listHistoryByUser } from "./history.repo";
+import { ensureHistoryLogConsumerStarted, publishHistoryLogEvent } from "./history.queue";
 
-export function getHistory(uid: string) {
-  return listHistoryByUser(uid);
+function normalizeUserId(uid: string | number | null | undefined): string {
+  if (typeof uid === "string" && uid.trim().length > 0) {
+    return uid;
+  }
+  if (typeof uid === "number" && Number.isFinite(uid)) {
+    return String(uid);
+  }
+  return DEMO_UID;
 }
 
-export function logHistory(
-  uid: string,
-  eventType: string,
-  eventSource: string,
+function warnHistoryConsumer() {
+  void ensureHistoryLogConsumerStarted().catch((error) => {
+    console.warn("History consumer is not running on RabbitMQ. Using fallback mode.", error);
+  });
+}
+
+export function getHistory(uid: string | number | null | undefined) {
+  warnHistoryConsumer();
+  return listHistoryByUser(normalizeUserId(uid));
+}
+
+export async function logHistory(
+  uid: string | number | null | undefined,
   message: string,
-  targetApplianceId?: string,
 ) {
-  return addHistoryEntry({
-    uid,
-    eventType,
-    eventSource,
+  warnHistoryConsumer();
+  return publishHistoryLogEvent({
+    user_id: normalizeUserId(uid),
     message,
-    targetApplianceId,
   });
 }

@@ -2,8 +2,8 @@ import { getAppliances, shutdownAppliance } from "@/lib/services/appliance/appli
 import { logHistory } from "@/lib/services/history/history.service";
 import type { AutomationResult } from "./automation.types";
 
-export function shutdownLowestPriorityAppliance(uid: string): AutomationResult {
-  const appliances = getAppliances(uid)
+export async function shutdownLowestPriorityAppliance(uid: string): Promise<AutomationResult> {
+  const appliances = (await getAppliances(uid))
     .filter((appliance) => appliance.state === "ON")
     .sort((left, right) => right.priority - left.priority);
 
@@ -16,7 +16,7 @@ export function shutdownLowestPriorityAppliance(uid: string): AutomationResult {
     };
   }
 
-  const updated = shutdownAppliance(candidate.id);
+  const updated = await shutdownAppliance(candidate.id);
   if (!updated) {
     return {
       action: "none",

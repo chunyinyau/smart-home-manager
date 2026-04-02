@@ -24,5 +24,17 @@ services:
     depends_on:
       - rate_db
 
+  # 3. Appliance API Component (Port 5002 on host)
+  appliance_service:
+    build: ./appliance-service
+    restart: always
+    ports:
+      - "5002:5002"
+    environment:
+      - DATABASE_URL=sqlite:////app/data/appliance.db
+    volumes:
+      - appliance_data:/app/data
+
 volumes:
   rate_db_data:
+  appliance_data:

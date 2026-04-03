@@ -24,12 +24,12 @@ services:
     volumes:
       - rate_db_data:/var/lib/mysql
 
-  # 2. Rate API Component (Port 5001 on host)
+  # 2. Rate API Component (Port 5007 on host)
   rate_service:
     build: ./rate-service
     restart: always
     ports:
-      - "5001:5001"
+      - "5007:5007"
     environment:
       - DATABASE_URL=mysql+pymysql://root:rate_root_password@rate_db:3306/rate_db
     depends_on:
@@ -134,6 +134,25 @@ services:
     depends_on:
       - history_db
       - rabbitmq
+
+  # 11. Display Composite Service (Port 5006 on host) — no DB
+  display_service:
+    build: ./display-service
+    restart: always
+    ports:
+      - "5006:5006"
+    environment:
+      - BUDGET_SERVICE_URL=http://budget_service:5004
+      - HISTORY_SERVICE_URL=http://history_service:5005
+      - BILL_SERVICE_URL=http://bill_service:5003
+      - APPLIANCE_SERVICE_URL=http://appliance_service:5002
+      - PROFILE_SERVICE_URL=https://personal-2nbikeej.outsystemscloud.com/Profile/rest/Profile/profile
+      - REQUEST_TIMEOUT_SECONDS=8
+    depends_on:
+      - budget_service
+      - history_service
+      - bill_service
+      - appliance_service
 
 volumes:
   rabbitmq_data:

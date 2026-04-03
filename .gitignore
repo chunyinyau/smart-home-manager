@@ -41,3 +41,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Ignore local microservice telemetry data
+appliance-service/data/appliance_telemetry_state.json

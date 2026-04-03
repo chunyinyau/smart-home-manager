@@ -10,6 +10,7 @@ Wattch is a smart home energy management demo built with Next.js. It shows how a
 - Exposes API routes for budget, appliance, history, profile, rate, and forecast data.
 - Includes a Telegram orchestrator flow for handling user intents.
 - Runs rate, appliance, budget, bill, and history as Dockerized Python microservices.
+- Runs calculatebill as a composite Flask microservice on port 5008.
 - Uses RabbitMQ for asynchronous history log ingestion.
 
 ## Tech Stack
@@ -87,8 +88,9 @@ Optional environment variables:
 - `SMOKE_BILL_SERVICE_URL` (default: `http://localhost:5003`)
 - `SMOKE_BUDGET_SERVICE_URL` (default: `http://localhost:5004`)
 - `SMOKE_HISTORY_SERVICE_URL` (default: `http://localhost:5005`)
+- `SMOKE_CALCULATEBILL_SERVICE_URL` (default: `http://localhost:5008`)
 
-The smoke test now verifies all existing microservices (rate, appliance, bill, budget, and history) through direct service checks, in addition to key Next.js API proxy routes.
+The smoke test now verifies all existing microservices (rate, appliance, bill, budget, history, and calculatebill) through direct service checks, in addition to key Next.js API proxy routes.
 The app-level rate sync check treats `429` and `502` as tolerated warnings because the data.gov.sg upstream can be rate-limited or temporarily unavailable.
 
 ## API Routes
@@ -110,6 +112,32 @@ The app includes the following route handlers:
 - `GET /api/rate`
 - `GET /api/forecast`
 - `POST /api/orchestrator`
+
+## CalculateBill Composite Service
+
+The CalculateBill composite service runs as a Flask container on port `5008` and orchestrates:
+
+- `appliance-service` for live appliance load (`/api/appliance`)
+- `rate-service` for tariff (`/api/rate`)
+- `bill-service` for period bill persistence (`/api/bills`)
+- `budget-service` for cumulative monthly bill updates (`/api/budget/<user_id>`)
+
+Endpoints exposed by the composite service:
+
+- `GET /api/calculatebill/state` - returns in-memory cycle totals per user
+- `POST /api/calculatebill/run` - executes one billing cycle (default 15 minutes)
+
+Example run request:
+
+```json
+{
+	"user_id": 1,
+	"uid": "user_demo_001",
+	"interval_minutes": 15,
+	"sync_budget": true,
+	"force_month_close": false
+}
+```
 
 ## RabbitMQ (History Events)
 

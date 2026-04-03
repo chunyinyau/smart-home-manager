@@ -6,9 +6,6 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
-    environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
 
@@ -123,7 +120,9 @@ services:
 
   # 8. History API Component (Port 5005 on host)
   history_service:
-    build: ./history-service
+    build:
+      context: .
+      dockerfile: history-service/Dockerfile
     restart: always
     ports:
       - "5005:5005"

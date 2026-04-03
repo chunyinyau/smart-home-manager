@@ -131,11 +131,11 @@ Example run request:
 
 ```json
 {
-	"user_id": 1,
-	"uid": "user_demo_001",
-	"interval_minutes": 15,
-	"sync_budget": true,
-	"force_month_close": false
+ "user_id": 1,
+ "uid": "user_demo_001",
+ "interval_minutes": 15,
+ "sync_budget": true,
+ "force_month_close": false
 }
 ```
 

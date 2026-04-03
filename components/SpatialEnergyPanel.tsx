@@ -15,10 +15,13 @@ import {
   Refrigerator,
 } from "lucide-react";
 
+import { ApplianceRecord } from "@/lib/types/display.types";
+
 type DeviceIcon = React.ComponentType<{ size?: number; color?: string }>;
 
 type Appliance = {
-  id: string;
+  id: string; // Layout ID (lights, ac, etc.)
+  realId?: string; // DB ID (app_1, etc.)
   name: string;
   room: string;
   icon: DeviceIcon;
@@ -120,25 +123,63 @@ function Sparkline({ data, colorClass }: { data: number[]; colorClass: string })
   );
 }
 
-export default function SpatialEnergyPanel() {
-  const [activeApplianceId, setActiveApplianceId] = useState<string>(APPLIANCES[0].id);
+interface SpatialEnergyPanelProps {
+  appliances?: ApplianceRecord[] | null;
+}
+
+export default function SpatialEnergyPanel({ appliances: liveAppliances }: SpatialEnergyPanelProps) {
+  // Map live data to layout
+  const mappedAppliances = useMemo(() => {
+    if (!liveAppliances || liveAppliances.length === 0) return APPLIANCES;
+
+    return APPLIANCES.map((layoutApp) => {
+      // Find matching live appliance by name or fallback
+      const liveApp = liveAppliances.find(
+        (a) =>
+          a.name.toLowerCase().includes(layoutApp.id.toLowerCase()) ||
+          (layoutApp.id === "lights" && a.name.toLowerCase().includes("lamp")) ||
+          (layoutApp.id === "ac" && a.name.toLowerCase().includes("ac")) ||
+          (layoutApp.id === "fridge" && a.name.toLowerCase().includes("fridge")) ||
+          (layoutApp.id === "tv" && a.name.toLowerCase().includes("entertainment")) ||
+          (layoutApp.id === "thermostat" && a.name.toLowerCase().includes("server"))
+      );
+
+      if (!liveApp) return layoutApp;
+
+      return {
+        ...layoutApp,
+        realId: liveApp.id,
+        name: liveApp.name,
+        room: liveApp.room,
+        status: liveApp.state === "ON" ? "online" : "offline",
+        stats: {
+          ...layoutApp.stats,
+          usageKwh: liveApp.kwhUsed,
+          cost: liveApp.kwhUsed * 0.25, // Mock calculation for display
+          hoursActive: layoutApp.stats.hoursActive, // Keep original hours for now
+        },
+      };
+    });
+  }, [liveAppliances]);
+
+  const [activeApplianceId, setActiveApplianceId] = useState<string>(mappedAppliances[0].id);
   const [hoveredApplianceId, setHoveredApplianceId] = useState<string | null>(null);
 
   const activeAppliance = useMemo(
-    () => APPLIANCES.find((appliance) => appliance.id === activeApplianceId) ?? APPLIANCES[0],
-    [activeApplianceId],
+    () => mappedAppliances.find((appliance) => appliance.id === activeApplianceId) ?? mappedAppliances[0],
+    [activeApplianceId, mappedAppliances],
   );
 
   const totals = useMemo(
     () =>
-      APPLIANCES.reduce(
+      mappedAppliances.reduce(
         (acc, appliance) => ({
           energyKwh: acc.energyKwh + appliance.stats.usageKwh,
           cost: acc.cost + appliance.stats.cost,
         }),
         { energyKwh: 0, cost: 0 },
       ),
-    [],
+    [mappedAppliances],
   );
 
   return (

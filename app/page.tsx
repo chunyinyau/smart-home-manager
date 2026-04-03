@@ -9,26 +9,16 @@ import {
 } from 'lucide-react';
 import SpatialEnergyPanel from '@/components/SpatialEnergyPanel';
 
-interface Budget {
-  cap: number;
-  current: number;
-  projected: number;
-  risk_level: 'SAFE' | 'HIGH' | 'CRITICAL';
-}
-
-const INITIAL_BUDGET: Budget = {
-  cap: 1000,
-  current: 880,
-  projected: 1150,
-  risk_level: 'HIGH',
-};
+import { DisplayPayload } from '@/lib/types/display.types';
+import { DEMO_UID } from '@/lib/shared/constants';
 
 export default function App() {
-  const budget = INITIAL_BUDGET;
   const [currentRate, setCurrentRate] = useState<number | null>(null);
+  const [data, setData] = useState<DisplayPayload | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Fetch live electricity rate from our new backend
+    // 1. Fetch live electricity rate
     fetch('/api/rate')
       .then(res => res.json())
       .then(data => {
@@ -38,7 +28,23 @@ export default function App() {
         }
       })
       .catch(console.error);
+
+    // 2. Fetch aggregated display data
+    fetch(`/api/display?uid=${DEMO_UID}&profile_id=1`)
+      .then(res => res.json())
+      .then(payload => {
+        setData(payload);
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error("Failed to fetch display data", err);
+        setLoading(false);
+      });
   }, []);
+
+  const budget = data?.budget;
+  const profile = data?.profile;
+  const history = data?.history || [];
 
   return (
     <div className="flex h-screen bg-white text-gray-900 font-sans selection:bg-blue-100">
@@ -130,30 +136,73 @@ export default function App() {
           </div>
         </header>
         <div className="flex-1 overflow-y-auto p-8 max-w-[1400px] mx-auto w-full">
-          <h1 className="text-[28px] font-semibold tracking-tight text-gray-900">Singapore-01 Node</h1>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <MetricCard value={`$${budget.current}`} label="Current Consumption" timeframe="Last 24h" />
-            <MetricCard
-              value={`$${budget.projected}`}
-              label="Projected EOF"
-              timeframe="OutSystems"
-              valueColor={budget.projected > budget.cap ? 'text-rose-600' : 'text-gray-900'}
+          <div className="flex justify-between items-center mb-6">
+            <h1 className="text-[28px] font-semibold tracking-tight text-gray-900">Singapore-01 Node</h1>
+            {loading && <span className="text-sm text-blue-600 animate-pulse font-medium">Syncing with Microservices...</span>}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <MetricCard 
+              value={`$${budget?.cum_bill?.toFixed(2) || '0.00'}`} 
+              label="Accrued Spend" 
+              timeframe="This Month" 
             />
             <MetricCard
-              value={budget.risk_level}
-              label="Budget Risk Level"
+              value={`${profile?.baseline_monthly_kwh || '---'} kWh`}
+              label="Baseline Target"
+              timeframe={`HDB Type ${profile?.hdb_type || '?'}`}
+            />
+            <MetricCard
+              value={
+                !budget ? '---' :
+                budget.cum_bill > budget.budget_cap ? 'CRITICAL' :
+                budget.cum_bill > budget.budget_cap * 0.8 ? 'WARNING' : 'SAFE'
+              }
+              label="Budget Status"
               timeframe="Live Sync"
               valueColor={
-                budget.risk_level === 'CRITICAL'
-                  ? 'text-rose-600'
-                  : budget.risk_level === 'HIGH'
-                  ? 'text-amber-500'
-                  : 'text-emerald-600'
+                !budget ? 'text-gray-400' :
+                budget.cum_bill > budget.budget_cap ? 'text-rose-600' :
+                budget.cum_bill > budget.budget_cap * 0.8 ? 'text-amber-500' : 'text-emerald-600'
               }
             />
-            <MetricCard value={`$${budget.cap}`} label="Total Cap Limit" timeframe="Monthly" />
+            <MetricCard 
+              value={`$${budget?.budget_cap?.toFixed(0) || '---'}`} 
+              label="Monthly Cap" 
+              timeframe="User Setting" 
+            />
           </div>
-          <SpatialEnergyPanel />
+
+          <div className="grid grid-cols-1 gap-6 mb-8">
+             <SpatialEnergyPanel appliances={data?.appliances} />
+          </div>
+
+          {/* NEW: Recent Logs Section */}
+          <div className="mt-4 border border-gray-200 rounded-2xl bg-white p-6 shadow-sm overflow-hidden">
+            <div className="flex items-center gap-2 mb-6 border-b border-gray-100 pb-4">
+              <Activity className="w-5 h-5 text-blue-600" />
+              <h2 className="text-lg font-bold text-gray-900">Recent System Activities</h2>
+            </div>
+            
+            <div className="space-y-4">
+              {history.length > 0 ? (
+                history.slice(0, 5).map((log) => (
+                  <div key={log.log_id} className="flex items-start gap-4 p-3 hover:bg-gray-50 rounded-lg transition-colors border-l-2 border-blue-500">
+                    <div className="min-w-[140px] text-[12px] font-bold text-gray-400 uppercase tracking-tight">
+                      {new Date(log.occurred_at).toLocaleString()}
+                    </div>
+                    <div className="text-sm font-medium text-gray-700">
+                      {log.message}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-8 text-gray-400 italic font-medium">
+                  No activity logs found.
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </main>
     </div>
@@ -192,9 +241,9 @@ function NavItem({
 function MetricCard({ value, label, timeframe, valueColor = 'text-gray-900' }: { value: string | number; label: string; timeframe: string; valueColor?: string }) {
   return (
     <div className="border border-gray-200 rounded-lg p-5 bg-white flex flex-col justify-between h-[120px] shadow-sm hover:shadow transition-shadow">
-      <div className={`text-[40px] leading-none font-semibold ${valueColor}`}>{value}</div>
+      <div className={`text-[32px] md:text-[40px] leading-none font-semibold ${valueColor} truncate`}>{value}</div>
       <div className="flex justify-between items-end mt-4">
-        <span className="text-sm font-medium text-gray-900">{label}</span>
+        <span className="text-sm font-medium text-gray-900 truncate">{label}</span>
         <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wider">{timeframe}</span>
       </div>
     </div>

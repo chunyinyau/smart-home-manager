@@ -1,4 +1,4 @@
-type ServiceKey = "rate" | "appliance" | "budget" | "history";
+type ServiceKey = "rate" | "appliance" | "budget" | "history" | "display";
 
 interface ServiceConfig {
   envVars: string[];
@@ -10,7 +10,7 @@ const SERVICE_CONFIG: Record<ServiceKey, ServiceConfig> = {
   rate: {
     envVars: ["RATE_SERVICE_BASE_URL", "RATE_SERVICE_URL"],
     dockerHost: "rate_service",
-    port: 5001,
+    port: 5007,
   },
   appliance: {
     envVars: ["APPLIANCE_SERVICE_BASE_URL", "APPLIANCE_SERVICE_URL"],
@@ -26,6 +26,11 @@ const SERVICE_CONFIG: Record<ServiceKey, ServiceConfig> = {
     envVars: ["HISTORY_SERVICE_BASE_URL", "HISTORY_SERVICE_URL"],
     dockerHost: "history_service",
     port: 5005,
+  },
+  display: {
+    envVars: ["DISPLAY_SERVICE_BASE_URL", "DISPLAY_SERVICE_URL"],
+    dockerHost: "display_service",
+    port: 5006,
   },
 };
 

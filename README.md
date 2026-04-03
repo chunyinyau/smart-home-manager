@@ -11,6 +11,7 @@ Wattch is a smart home energy management demo built with Next.js. It shows how a
 - Includes a Telegram orchestrator flow for handling user intents.
 - Runs rate, appliance, budget, bill, and history as Dockerized Python microservices.
 - Runs calculatebill as a composite Flask microservice on port 5008.
+- Runs forecastbill as a composite Flask microservice on port 5009.
 - Uses RabbitMQ for asynchronous history log ingestion.
 
 ## Tech Stack
@@ -67,7 +68,7 @@ http://localhost:3000
 - `npm run build` - build the production app
 - `npm run start` - run the production build
 - `npm run lint` - run ESLint
-- `npm run smoke:test` - run API smoke checks for rate, rate sync, budget, and telemetry status
+- `npm run smoke:test` - run API smoke checks for Next routes and all microservices
 
 ## Smoke Test
 
@@ -88,9 +89,10 @@ Optional environment variables:
 - `SMOKE_BILL_SERVICE_URL` (default: `http://localhost:5003`)
 - `SMOKE_BUDGET_SERVICE_URL` (default: `http://localhost:5004`)
 - `SMOKE_HISTORY_SERVICE_URL` (default: `http://localhost:5005`)
+- `SMOKE_FORECASTBILL_SERVICE_URL` (default: `http://localhost:5009`)
 - `SMOKE_CALCULATEBILL_SERVICE_URL` (default: `http://localhost:5008`)
 
-The smoke test now verifies all existing microservices (rate, appliance, bill, budget, history, and calculatebill) through direct service checks, in addition to key Next.js API proxy routes.
+The smoke test now verifies all existing microservices (rate, appliance, bill, budget, history, forecastbill, and calculatebill) through direct service checks, in addition to key Next.js API proxy routes.
 The app-level rate sync check treats `429` and `502` as tolerated warnings because the data.gov.sg upstream can be rate-limited or temporarily unavailable.
 
 ## API Routes
@@ -138,6 +140,19 @@ Example run request:
  "force_month_close": false
 }
 ```
+
+## ForecastBill Composite Service
+
+The ForecastBill composite service runs as a Flask container on port `5009` and orchestrates:
+
+- `bill-service` for same-month spend history (`/api/bills`)
+- `budget-service` for budget cap and cumulative bill (`/api/budget/<user_id>`)
+- `rate-service` for current tariff (`/api/rate`)
+- `picoclaw/forecast.py` for PicoClaw AI assessment via OpenAI Responses API
+
+Endpoint exposed by the composite service:
+
+- `GET /api/forecast` - returns assembled forecast payload with `riskLevel`, `daysToExceed`, and `shortNarrative`
 
 ## RabbitMQ (History Events)
 

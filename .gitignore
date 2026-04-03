@@ -42,5 +42,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# Ignore local microservice telemetry data
+appliance-service/data/appliance_telemetry_state.json
 appliance-service/data/appliance_energy_data.csv
-applaince-service/data/appliance_energy_data.json
+appliance-service/data/appliance_energy_data.json

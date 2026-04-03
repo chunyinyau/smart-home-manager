@@ -61,6 +61,11 @@ const serviceBaseUrls = {
     "HISTORY_SERVICE_BASE_URL",
     "HISTORY_SERVICE_URL",
   ]),
+  calculatebill: resolveBaseUrl("http://localhost:5008", [
+    "SMOKE_CALCULATEBILL_SERVICE_URL",
+    "CALCULATEBILL_SERVICE_BASE_URL",
+    "CALCULATEBILL_SERVICE_URL",
+  ]),
 };
 
 const checks = [
@@ -151,6 +156,15 @@ const checks = [
     path: `/api/history?user_id=${encodeURIComponent(historyUserId)}`,
     baseUrl: serviceBaseUrls.history,
     label: "history-service",
+    expectedStatuses: [200],
+    toleratedStatuses: [],
+  },
+  {
+    name: "CalculateBill Service State",
+    method: "GET",
+    path: "/api/calculatebill/state",
+    baseUrl: serviceBaseUrls.calculatebill,
+    label: "calculatebill-service",
     expectedStatuses: [200],
     toleratedStatuses: [],
   },
@@ -275,6 +289,7 @@ async function main() {
   console.log(`- bill-service: ${serviceBaseUrls.bill}`);
   console.log(`- budget-service: ${serviceBaseUrls.budget}`);
   console.log(`- history-service: ${serviceBaseUrls.history}`);
+  console.log(`- calculatebill-service: ${serviceBaseUrls.calculatebill}`);
   console.log(`Timeout: ${timeoutMs}ms`);
   console.log("");
 

@@ -5,8 +5,7 @@ import {
   Search, LayoutDashboard, Server, Database, Wallet,
   Activity, Layers, Wrench, ShieldCheck, Settings,
   MessageSquare, Sun, Moon, Book, ChevronDown,
-  ChevronRight, Copy, FileText, CheckCircle2,
-  AlertTriangle, Clock, Play, Download, Zap
+  ChevronRight, Zap
 } from 'lucide-react';
 import SpatialEnergyPanel from '@/components/SpatialEnergyPanel';
 
@@ -17,24 +16,6 @@ interface Budget {
   risk_level: 'SAFE' | 'HIGH' | 'CRITICAL';
 }
 
-interface Appliance {
-  id: string;
-  name: string;
-  type: string;
-  state: 'ON' | 'OFF';
-  draw: number;
-}
-
-interface Alert {
-  id: string;
-  timestamp: string;
-  message: string;
-  type: 'info' | 'warning' | 'success' | 'critical';
-  status: string;
-  targetAppId?: string;
-  ttl?: number;
-}
-
 const INITIAL_BUDGET: Budget = {
   cap: 1000,
   current: 880,
@@ -42,38 +23,8 @@ const INITIAL_BUDGET: Budget = {
   risk_level: 'HIGH',
 };
 
-const INITIAL_APPLIANCES: Appliance[] = [
-  { id: 'app_1', name: 'Main AC (Living)', type: 'Essential', state: 'ON', draw: 2500 },
-  { id: 'app_2', name: 'Server Rack', type: 'Essential', state: 'ON', draw: 800 },
-  { id: 'app_3', name: 'Entertainment Unit', type: 'Non-Essential', state: 'ON', draw: 450 },
-  { id: 'app_4', name: 'Desk Lamp', type: 'Non-Essential', state: 'ON', draw: 60 },
-  { id: 'app_5', name: 'Guest AC', type: 'Non-Essential', state: 'OFF', draw: 0 },
-];
-
-const INITIAL_ALERTS: Alert[] = [
-  {
-    id: 'alt_1',
-    timestamp: new Date(Date.now() - 1000 * 60 * 5).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    message: 'Meter Reading OCR extracted: 452 kWh. Budget updated.',
-    type: 'info',
-    status: 'LOGGED',
-  },
-  {
-    id: 'alt_2',
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    message: 'Desk lamp on past 10 PM. Awaiting ACK.',
-    type: 'warning',
-    status: 'AWAITING_ACK',
-    targetAppId: 'app_4',
-    ttl: 15,
-  },
-];
-
 export default function App() {
-  const [budget, setBudget] = useState<Budget>(INITIAL_BUDGET);
-  const [appliances, setAppliances] = useState<Appliance[]>(INITIAL_APPLIANCES);
-  const [alerts, setAlerts] = useState<Alert[]>(INITIAL_ALERTS);
-  const [rescueStage, setRescueStage] = useState<number>(0);
+  const budget = INITIAL_BUDGET;
   const [currentRate, setCurrentRate] = useState<number | null>(null);
 
   useEffect(() => {
@@ -87,105 +38,7 @@ export default function App() {
         }
       })
       .catch(console.error);
-
-    const timer = setInterval(() => {
-      setAlerts((currentAlerts) =>
-        currentAlerts.map((alert) => {
-          if (alert.status === 'AWAITING_ACK' && alert.ttl && alert.ttl > 0) {
-            const newTtl = alert.ttl - 1;
-            if (newTtl === 0) {
-              executeAutoCutoff(alert.targetAppId || '');
-              return { ...alert, ttl: 0, status: 'RESOLVED_AUTO', message: `${alert.message} (Auto-Cutoff Executed)` };
-            }
-            return { ...alert, ttl: newTtl };
-          }
-          return alert;
-        })
-      );
-    }, 1000);
-    return () => clearInterval(timer);
   }, []);
-
-  const executeAutoCutoff = (appId: string) => {
-    setAppliances((apps) =>
-      apps.map((app) =>
-        app.id === appId ? { ...app, state: 'OFF', draw: 0 } : app
-      )
-    );
-    setBudget((prev) => ({
-      ...prev,
-      projected: prev.projected - 30,
-      risk_level: prev.projected - 30 < 1000 ? 'SAFE' : 'HIGH',
-    }));
-  };
-
-  const handleUserAck = (alertId: string, appId: string, action: 'off' | 'keep') => {
-    setAlerts((alerts) =>
-      alerts.map((a) =>
-        a.id === alertId ? { ...a, status: `RESOLVED_USER_${action.toUpperCase()}`, ttl: 0 } : a
-      )
-    );
-    if (action === 'off') {
-      executeAutoCutoff(appId);
-    }
-  };
-
-  const toggleAppliance = (appId: string) => {
-    setAppliances((apps) =>
-      apps.map((app) => {
-        if (app.id === appId) {
-          const isTurningOn = app.state === 'OFF';
-          return {
-            ...app,
-            state: isTurningOn ? 'ON' : 'OFF',
-            draw: isTurningOn ? (app.id === 'app_4' ? 60 : 450) : 0,
-          };
-        }
-        return app;
-      })
-    );
-  };
-
-  const runRescueProtocol = (stage: number) => {
-    setRescueStage(stage);
-    if (stage === 1) {
-      setAppliances((apps) =>
-        apps.map((a) => (a.id === 'app_3' ? { ...a, state: 'OFF', draw: 0 } : a))
-      );
-      setBudget((prev) => ({ ...prev, projected: 1060 }));
-    } else if (stage === 2) {
-      setAppliances((apps) =>
-        apps.map((a) => (a.id === 'app_4' || a.id === 'app_5' ? { ...a, state: 'OFF', draw: 0 } : a))
-      );
-      setBudget((prev) => ({ ...prev, projected: 1010 }));
-    } else if (stage === 3) {
-      setBudget((prev) => ({ ...prev, projected: 990, risk_level: 'SAFE' }));
-      setAlerts((prev) => [
-        {
-          id: `alt_rescue_${Date.now()}`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          message: 'Stage C Rescue complete. Budget secured at $990.',
-          type: 'success',
-          status: 'RESOLVED_SYSTEM',
-        },
-        ...prev,
-      ]);
-    } else if (stage === 4) {
-      setAlerts((prev) => [
-        {
-          id: `alt_exception_${Date.now()}`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          message: 'Budget Escalation Unresolved. Automation halted.',
-          type: 'critical',
-          status: 'EXCEPTION',
-        },
-        ...prev,
-      ]);
-    }
-  };
-
-  const totalDraw = appliances.reduce((sum, app) => sum + app.draw, 0);
-  const activeApps = appliances.filter((a) => a.state === 'ON').length;
 
   return (
     <div className="flex h-screen bg-white text-gray-900 font-sans selection:bg-blue-100">

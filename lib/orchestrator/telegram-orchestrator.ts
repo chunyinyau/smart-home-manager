@@ -23,7 +23,7 @@ export async function handleTelegramIntent(
   if (intent === "status") {
     return {
       budget: getBudgetStatus(uid),
-      appliances: getAppliances(uid),
+      appliances: await getAppliances(uid),
       rate: await getRate(),
     };
   }
@@ -33,13 +33,17 @@ export async function handleTelegramIntent(
   }
 
   if (intent === "set_budget") {
-    if (typeof params.monthlyCap !== "number") {
+    if (typeof params.monthlyCap !== "number" || !Number.isFinite(params.monthlyCap)) {
       return { error: "monthlyCap is required for set_budget." };
     }
 
     const budget = updateMonthlyCap(uid, params.monthlyCap);
     if (budget) {
-      await logHistory(uid, `Monthly cap updated to $${params.monthlyCap}.`);
+      try {
+        await logHistory(uid, `Monthly cap updated to $${params.monthlyCap}.`);
+      } catch (error) {
+        console.warn("History logging failed after set_budget intent:", error);
+      }
     }
     return budget;
   }
@@ -48,7 +52,11 @@ export async function handleTelegramIntent(
     if (params.aid) {
       const appliance = await shutdownAppliance(params.aid);
       if (appliance) {
-        await logHistory(uid, `User requested shutdown for ${appliance.name}.`);
+        try {
+          await logHistory(uid, `User requested shutdown for ${appliance.name}.`);
+        } catch (error) {
+          console.warn("History logging failed after shutdown intent:", error);
+        }
       }
       return appliance;
     }
@@ -56,7 +64,7 @@ export async function handleTelegramIntent(
   }
 
   if (intent === "history") {
-    return getHistory(uid);
+    return await getHistory(uid);
   }
 
   if (intent === "profile") {

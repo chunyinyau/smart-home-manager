@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     const result = await handleTelegramIntent(intent, body.params ?? {});
     return NextResponse.json(result);
   } catch (error) {
-    console.error("❌ ORCHESTRATOR FAILURE:", error);
+    console.error("ORCHESTRATOR FAILURE:", error);
     return NextResponse.json(
       { error: "Appliance microservice is currently unreachable" },
       { status: 503 },

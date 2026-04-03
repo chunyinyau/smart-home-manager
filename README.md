@@ -9,7 +9,7 @@ Wattch is a smart home energy management demo built with Next.js. It shows how a
 - Surfaces alerts with acknowledgement and auto-cutoff behavior.
 - Exposes API routes for budget, appliance, history, profile, rate, and forecast data.
 - Includes a Telegram orchestrator flow for handling user intents.
-- Runs the rate and appliance backends as Dockerized microservices.
+- Runs rate, appliance, budget, bill, and history as Dockerized Python microservices.
 - Uses RabbitMQ for asynchronous history log ingestion.
 
 ## Tech Stack
@@ -19,6 +19,8 @@ Wattch is a smart home energy management demo built with Next.js. It shows how a
 - TypeScript
 - Tailwind CSS 4
 - Lucide icons
+- Flask microservices
+- MySQL
 - RabbitMQ
 
 ## Project Structure
@@ -30,6 +32,7 @@ Wattch is a smart home energy management demo built with Next.js. It shows how a
 - `lib/services/*` - business logic and repository helpers
 - `lib/orchestrator/*` - Telegram intent parsing and orchestration
 - `lib/clients/*` - lightweight client stubs used by the demo
+- `history-service/` - Python Flask history microservice with RabbitMQ consumer
 
 ## Getting Started
 
@@ -63,6 +66,30 @@ http://localhost:3000
 - `npm run build` - build the production app
 - `npm run start` - run the production build
 - `npm run lint` - run ESLint
+- `npm run smoke:test` - run API smoke checks for rate, rate sync, budget, and telemetry status
+
+## Smoke Test
+
+After the Next.js app and Docker microservices are running, execute:
+
+```bash
+npm run smoke:test
+```
+
+Optional environment variables:
+
+- `SMOKE_BASE_URL` (default: `http://localhost:3000`)
+- `SMOKE_TIMEOUT_MS` (default: `15000`)
+- `SMOKE_BUDGET_USER_ID` (default: `1`)
+- `SMOKE_HISTORY_USER_ID` (default: `user_demo_001`)
+- `SMOKE_RATE_SERVICE_URL` (default: `http://localhost:5001`)
+- `SMOKE_APPLIANCE_SERVICE_URL` (default: `http://localhost:5002`)
+- `SMOKE_BILL_SERVICE_URL` (default: `http://localhost:5003`)
+- `SMOKE_BUDGET_SERVICE_URL` (default: `http://localhost:5004`)
+- `SMOKE_HISTORY_SERVICE_URL` (default: `http://localhost:5005`)
+
+The smoke test now verifies all existing microservices (rate, appliance, bill, budget, and history) through direct service checks, in addition to key Next.js API proxy routes.
+The app-level rate sync check treats `429` and `502` as tolerated warnings because the data.gov.sg upstream can be rate-limited or temporarily unavailable.
 
 ## API Routes
 
@@ -78,6 +105,7 @@ The app includes the following route handlers:
 - `POST /api/appliance/telemetry/advance`
 - `POST /api/appliance/telemetry/reset`
 - `GET /api/history`
+- `POST /api/history/log`
 - `GET /api/profile`
 - `GET /api/rate`
 - `GET /api/forecast`

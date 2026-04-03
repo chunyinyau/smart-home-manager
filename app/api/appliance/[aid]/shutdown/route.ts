@@ -13,7 +13,7 @@ export async function POST(
     }
     return NextResponse.json(appliance);
   } catch (error) {
-    console.error("❌ APPLIANCE SHUTDOWN FAILURE:", error);
+    console.error("APPLIANCE SHUTDOWN FAILURE:", error);
     return NextResponse.json(
       { error: "Appliance microservice is currently unreachable" },
       { status: 503 },

@@ -1,55 +1,51 @@
 import type { ApplianceRecord } from "@/lib/services/appliance/appliance.types";
-import { getApplianceServiceUrl } from "@/lib/shared/service-urls";
-
-function buildApplianceUrl(path: string) {
-  return `${getApplianceServiceUrl()}${path}`;
-}
+import {
+  extractErrorMessage,
+  fetchService,
+  readJsonBody,
+} from "@/lib/clients/service-discovery";
 
 async function readErrorMessage(response: Response) {
-  try {
-    const payload = (await response.json()) as { error?: string; message?: string };
-    return payload.error ?? payload.message ?? null;
-  } catch {
-    return null;
-  }
+  const payload = await readJsonBody<Record<string, unknown>>(response);
+  return extractErrorMessage(payload, "Appliance microservice returned an error");
 }
 
 export async function fetchAppliances(uid: string): Promise<ApplianceRecord[]> {
-  const response = await fetch(buildApplianceUrl(`/api/appliance?uid=${encodeURIComponent(uid)}`), {
-    cache: "no-store",
-  });
+  const response = await fetchService(
+    "appliance",
+    `/api/appliance?uid=${encodeURIComponent(uid)}`,
+  );
 
   if (!response.ok) {
-    const message = await readErrorMessage(response);
-    throw new Error(message ?? "Appliance microservice returned an error");
+    throw new Error(await readErrorMessage(response));
   }
 
   return (await response.json()) as ApplianceRecord[];
 }
 
 export async function fetchAppliance(aid: string): Promise<ApplianceRecord | null> {
-  const response = await fetch(buildApplianceUrl(`/api/appliance/${encodeURIComponent(aid)}`), {
-    cache: "no-store",
-  });
+  const response = await fetchService(
+    "appliance",
+    `/api/appliance/${encodeURIComponent(aid)}`,
+  );
 
   if (response.status === 404) {
     return null;
   }
 
   if (!response.ok) {
-    const message = await readErrorMessage(response);
-    throw new Error(message ?? "Appliance microservice returned an error");
+    throw new Error(await readErrorMessage(response));
   }
 
   return (await response.json()) as ApplianceRecord;
 }
 
 export async function shutdownApplianceInService(aid: string): Promise<ApplianceRecord | null> {
-  const response = await fetch(
-    buildApplianceUrl(`/api/appliance/${encodeURIComponent(aid)}/shutdown`),
+  const response = await fetchService(
+    "appliance",
+    `/api/appliance/${encodeURIComponent(aid)}/shutdown`,
     {
       method: "POST",
-      cache: "no-store",
     },
   );
 
@@ -58,8 +54,7 @@ export async function shutdownApplianceInService(aid: string): Promise<Appliance
   }
 
   if (!response.ok) {
-    const message = await readErrorMessage(response);
-    throw new Error(message ?? "Appliance microservice returned an error");
+    throw new Error(await readErrorMessage(response));
   }
 
   return (await response.json()) as ApplianceRecord;
@@ -69,15 +64,15 @@ export async function updateAppliancePriorityInService(
   aid: string,
   priority: number,
 ): Promise<ApplianceRecord | null> {
-  const response = await fetch(
-    buildApplianceUrl(`/api/appliance/${encodeURIComponent(aid)}/priority`),
+  const response = await fetchService(
+    "appliance",
+    `/api/appliance/${encodeURIComponent(aid)}/priority`,
     {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ priority }),
-      cache: "no-store",
     },
   );
 
@@ -86,8 +81,7 @@ export async function updateAppliancePriorityInService(
   }
 
   if (!response.ok) {
-    const message = await readErrorMessage(response);
-    throw new Error(message ?? "Appliance microservice returned an error");
+    throw new Error(await readErrorMessage(response));
   }
 
   return (await response.json()) as ApplianceRecord;

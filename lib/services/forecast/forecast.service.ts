@@ -22,7 +22,11 @@ export async function getForecast(uid: string): Promise<ForecastRecord | null> {
   });
 
   syncBudgetForecast(uid, prediction.projectedCost);
-  await logHistory(uid, `Forecast generated. ${prediction.reasoning}`);
+  try {
+    await logHistory(uid, `Forecast generated. ${prediction.reasoning}`);
+  } catch (error) {
+    console.warn("Forecast history logging failed:", error);
+  }
 
   return {
     uid,

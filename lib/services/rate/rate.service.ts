@@ -7,21 +7,34 @@
  * This file is kept as a thin fetch wrapper so existing frontend
  * components can continue importing from "@/lib/services/rate".
  */
+import {
+  extractErrorMessage,
+  fetchService,
+  readJsonBody,
+} from "@/lib/clients/service-discovery";
 
-const RATE_SERVICE_URL = "http://127.0.0.1:5001";
+interface RateServiceResponse {
+  success?: boolean;
+  error?: string;
+  message?: string;
+  data?: Array<{
+    rate_id: number;
+    cents_per_kwh: number | string;
+    month_year: string;
+  }>;
+}
 
 export async function getCurrentRate() {
-  const res = await fetch(`${RATE_SERVICE_URL}/api/rate`, {
-    cache: "no-store",
-  });
+  const res = await fetchService("rate", "/api/rate");
+  const json = await readJsonBody<RateServiceResponse>(res);
 
   if (!res.ok) {
-    throw new Error("Rate microservice returned an error");
+    throw new Error(
+      extractErrorMessage(json, `Rate microservice returned HTTP ${res.status}`),
+    );
   }
 
-  const json = await res.json();
-
-  if (!json.success || !json.data || json.data.length === 0) {
+  if (!json?.success || !Array.isArray(json.data) || json.data.length === 0) {
     throw new Error("No active rate found");
   }
 

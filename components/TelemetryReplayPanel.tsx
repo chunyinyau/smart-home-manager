@@ -164,12 +164,11 @@ export default function TelemetryReplayPanel() {
               {currentRow ? (
                 <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
                   {[
-                    ["aircon_w", currentRow.aircon_w],
-                    ["purifier_w", currentRow.purifier_w],
-                    ["fan_w", currentRow.fan_w],
-                    ["tv_w", currentRow.tv_w],
-                    ["charger_w", currentRow.charger_w],
-                    ["fridge_w", currentRow.fridge_w],
+                    ["Fridge", currentRow.fridge_w],
+                    ["TV", currentRow.tv_w],
+                    ["Light", currentRow.light_w],
+                    ["Air Conditioning", currentRow.air_conditioning_w],
+                    ["Smart Panel", currentRow.smart_panel_w],
                   ].map(([label, value]) => (
                     <Metric key={String(label)} label={String(label)} value={formatValue(value)} />
                   ))}
@@ -192,12 +191,12 @@ export default function TelemetryReplayPanel() {
                     <span className="font-medium text-gray-900">{formatValue(nextRow.total_slice_kwh)}</span>
                   </div>
                   <div className="flex justify-between gap-4 border-b border-gray-100 pb-2">
-                    <span className="text-gray-500">Aircon</span>
-                    <span className="font-medium text-gray-900">{formatValue(nextRow.aircon_w)} W</span>
+                    <span className="text-gray-500">Light</span>
+                    <span className="font-medium text-gray-900">{formatValue(nextRow.light_w)} W</span>
                   </div>
                   <div className="flex justify-between gap-4">
-                    <span className="text-gray-500">Fridge</span>
-                    <span className="font-medium text-gray-900">{formatValue(nextRow.fridge_w)} W</span>
+                    <span className="text-gray-500">Smart Panel</span>
+                    <span className="font-medium text-gray-900">{formatValue(nextRow.smart_panel_w)} W</span>
                   </div>
                 </div>
               ) : (

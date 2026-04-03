@@ -8,18 +8,16 @@ from typing import Any
 
 
 _NUMERIC_FIELDS = {
-    "aircon_w",
-    "purifier_w",
-    "fan_w",
-    "tv_w",
-    "charger_w",
     "fridge_w",
-    "aircon_wh",
-    "purifier_wh",
-    "fan_wh",
-    "tv_wh",
-    "charger_wh",
+    "tv_w",
+    "light_w",
+    "air_conditioning_w",
+    "smart_panel_w",
     "fridge_wh",
+    "tv_wh",
+    "light_wh",
+    "air_conditioning_wh",
+    "smart_panel_wh",
     "total_slice_kwh",
 }
 

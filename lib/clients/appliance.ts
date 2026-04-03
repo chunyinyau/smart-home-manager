@@ -1,10 +1,8 @@
 import type { ApplianceRecord } from "@/lib/services/appliance/appliance.types";
-
-const APPLIANCE_SERVICE_URL =
-  process.env.APPLIANCE_SERVICE_URL ?? "http://127.0.0.1:5002";
+import { getApplianceServiceUrl } from "@/lib/shared/service-urls";
 
 function buildApplianceUrl(path: string) {
-  return `${APPLIANCE_SERVICE_URL}${path}`;
+  return `${getApplianceServiceUrl()}${path}`;
 }
 
 async function readErrorMessage(response: Response) {

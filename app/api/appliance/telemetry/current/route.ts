@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-
-const TELEMETRY_SERVICE_URL = "http://127.0.0.1:5002";
+import { getApplianceServiceUrl } from "@/lib/shared/service-urls";
 
 export async function GET() {
   try {
-    const response = await fetch(`${TELEMETRY_SERVICE_URL}/api/appliance/telemetry/current`, {
+    const response = await fetch(`${getApplianceServiceUrl()}/api/appliance/telemetry/current`, {
       cache: "no-store",
     });
 

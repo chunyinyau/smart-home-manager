@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-
-const TELEMETRY_SERVICE_URL = "http://127.0.0.1:5002";
+import { getApplianceServiceUrl } from "@/lib/shared/service-urls";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const response = await fetch(`${TELEMETRY_SERVICE_URL}/api/appliance/telemetry/advance`, {
+    const response = await fetch(`${getApplianceServiceUrl()}/api/appliance/telemetry/advance`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

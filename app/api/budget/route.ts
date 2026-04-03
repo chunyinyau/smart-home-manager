@@ -1,17 +1,168 @@
 import { NextResponse } from "next/server";
-import { BudgetService } from "@/lib/services/budget/budget.service";
+import {
+  extractErrorMessage,
+  fetchService,
+  readJsonBody,
+} from "@/lib/clients/service-discovery";
 
-// Update Monthly Cap 
-export async function PATCH(request: Request) {
-  const { user_id, budget_cap } = await request.json();
-  const updated = await BudgetService.updateMonthlyCap(user_id, budget_cap);
-  return NextResponse.json(updated);
+const DEFAULT_BUDGET_USER_ID = Number(process.env.DEFAULT_BUDGET_USER_ID ?? "1");
+
+function parseUserId(value: unknown): number | null {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
+    return value;
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    return null;
+  }
+
+  const parsed = Number(trimmed);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return parsed;
 }
 
-// Get Budget Details 
+function getDefaultUserId(): number | null {
+  if (!Number.isSafeInteger(DEFAULT_BUDGET_USER_ID) || DEFAULT_BUDGET_USER_ID <= 0) {
+    return null;
+  }
+
+  return DEFAULT_BUDGET_USER_ID;
+}
+
+function parseBudgetCap(value: unknown): number | null {
+  const cap = Number(value);
+  if (!Number.isFinite(cap) || cap <= 0) {
+    return null;
+  }
+
+  return Number(cap.toFixed(2));
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const body = (await request.json().catch(() => null)) as
+      | Record<string, unknown>
+      | null;
+
+    if (!body) {
+      return NextResponse.json({ error: "Request body is required." }, { status: 400 });
+    }
+
+    const hasExplicitUserId = Object.prototype.hasOwnProperty.call(body, "user_id");
+    const hasUidAlias = Object.prototype.hasOwnProperty.call(body, "uid");
+
+    let userId: number | null;
+    if (hasExplicitUserId) {
+      userId = parseUserId(body.user_id);
+      if (userId === null) {
+        return NextResponse.json({ error: "user_id must be a positive integer." }, { status: 400 });
+      }
+    } else if (hasUidAlias) {
+      userId = parseUserId(body.uid) ?? getDefaultUserId();
+    } else {
+      userId = getDefaultUserId();
+    }
+
+    if (userId === null) {
+      return NextResponse.json(
+        { error: "DEFAULT_BUDGET_USER_ID must be configured as a positive integer." },
+        { status: 500 },
+      );
+    }
+
+    const budgetCap = parseBudgetCap(body.budget_cap ?? body.monthlyCap);
+    if (budgetCap === null) {
+      return NextResponse.json(
+        { error: "budget_cap must be a positive number." },
+        { status: 400 },
+      );
+    }
+
+    const response = await fetchService("budget", `/api/budget/${userId}/cap`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ budget_cap: budgetCap }),
+    });
+    const payload = await readJsonBody<Record<string, unknown>>(response);
+
+    if (!response.ok) {
+      return NextResponse.json(
+        {
+          error: extractErrorMessage(
+            payload,
+            `Budget service returned HTTP ${response.status}`,
+          ),
+        },
+        { status: response.status },
+      );
+    }
+
+    return NextResponse.json(payload ?? { success: true });
+  } catch (error) {
+    console.error("❌ BUDGET PATCH FAILURE:", error);
+    return NextResponse.json(
+      { error: "Budget microservice is currently unreachable" },
+      { status: 503 },
+    );
+  }
+}
+
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const userId = Number(searchParams.get("user_id"));
-  const budget = await BudgetService.getBudget(userId);
-  return NextResponse.json(budget);
+  try {
+    const { searchParams } = new URL(request.url);
+    const explicitUserId = searchParams.get("user_id");
+    const uidAlias = searchParams.get("uid");
+
+    let userId: number | null;
+    if (explicitUserId !== null) {
+      userId = parseUserId(explicitUserId);
+      if (userId === null) {
+        return NextResponse.json({ error: "user_id must be a positive integer." }, { status: 400 });
+      }
+    } else if (uidAlias !== null) {
+      userId = parseUserId(uidAlias) ?? getDefaultUserId();
+    } else {
+      userId = getDefaultUserId();
+    }
+
+    if (userId === null) {
+      return NextResponse.json(
+        { error: "DEFAULT_BUDGET_USER_ID must be configured as a positive integer." },
+        { status: 500 },
+      );
+    }
+
+    const response = await fetchService("budget", `/api/budget/${userId}`);
+    const payload = await readJsonBody<Record<string, unknown>>(response);
+
+    if (!response.ok) {
+      return NextResponse.json(
+        {
+          error: extractErrorMessage(
+            payload,
+            `Budget service returned HTTP ${response.status}`,
+          ),
+        },
+        { status: response.status },
+      );
+    }
+
+    return NextResponse.json(payload ?? { success: true, data: null });
+  } catch (error) {
+    console.error("❌ BUDGET GET FAILURE:", error);
+    return NextResponse.json(
+      { error: "Budget microservice is currently unreachable" },
+      { status: 503 },
+    );
+  }
 }

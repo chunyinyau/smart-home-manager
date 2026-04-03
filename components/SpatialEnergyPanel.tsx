@@ -7,7 +7,6 @@ import {
   Lightbulb,
   Power,
   Server,
-  Smartphone,
   Thermometer,
   TrendingUp,
   Tv,

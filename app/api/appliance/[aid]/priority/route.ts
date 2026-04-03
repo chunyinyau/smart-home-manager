@@ -24,7 +24,7 @@ export async function PATCH(
 
     return NextResponse.json(appliance);
   } catch (error) {
-    console.error("❌ APPLIANCE PRIORITY FAILURE:", error);
+    console.error("APPLIANCE PRIORITY FAILURE:", error);
     return NextResponse.json(
       { error: "Appliance microservice is currently unreachable" },
       { status: 503 },

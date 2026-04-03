@@ -1,4 +1,9 @@
 import { NextResponse } from "next/server";
+import {
+  extractErrorMessage,
+  fetchService,
+  readJsonBody,
+} from "@/lib/clients/service-discovery";
 
 /**
  * GET /api/rate/sync
@@ -7,19 +12,25 @@ import { NextResponse } from "next/server";
  */
 export async function GET() {
   try {
-    const response = await fetch("http://127.0.0.1:5001/api/rate/sync", {
-      cache: "no-store",
-    });
+    const response = await fetchService("rate", "/api/rate/sync");
+    const payload = await readJsonBody<Record<string, unknown>>(response);
 
     if (!response.ok) {
-      throw new Error(`Flask sync endpoint returned ${response.status}`);
+      return NextResponse.json(
+        {
+          success: false,
+          error: extractErrorMessage(
+            payload,
+            `Rate sync service returned HTTP ${response.status}`,
+          ),
+        },
+        { status: response.status },
+      );
     }
 
-    const data = await response.json();
-    return NextResponse.json(data);
-
+    return NextResponse.json(payload ?? { success: true });
   } catch (error) {
-    console.error("❌ RATE SYNC PROXY FAILURE:", error);
+    console.error("RATE SYNC PROXY FAILURE:", error);
     return NextResponse.json(
       { success: false, error: "Rate sync microservice is unreachable" },
       { status: 503 }

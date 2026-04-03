@@ -25,7 +25,11 @@ export async function shutdownLowestPriorityAppliance(uid: string): Promise<Auto
     };
   }
 
-  await logHistory(uid, `Automation service shut down ${updated.name} based on lowest priority.`);
+  try {
+    await logHistory(uid, `Automation service shut down ${updated.name} based on lowest priority.`);
+  } catch (error) {
+    console.warn("Automation history logging failed:", error);
+  }
 
   return {
     action: "shutdown",

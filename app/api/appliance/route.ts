@@ -9,7 +9,7 @@ export async function GET(request: Request) {
     const appliances = await getAppliances(uid);
     return NextResponse.json(appliances);
   } catch (error) {
-    console.error("❌ APPLIANCE LIST FAILURE:", error);
+    console.error("APPLIANCE LIST FAILURE:", error);
     return NextResponse.json(
       { error: "Appliance microservice is currently unreachable" },
       { status: 503 },

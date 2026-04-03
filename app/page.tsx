@@ -12,10 +12,31 @@ import SpatialEnergyPanel from '@/components/SpatialEnergyPanel';
 import { DisplayPayload } from '@/lib/types/display.types';
 import { DEMO_UID } from '@/lib/shared/constants';
 
+type CalculateBillRunPayload = {
+  success?: boolean;
+  error?: string;
+  data?: {
+    computed_at?: string;
+    result?: {
+      period_kwh?: number;
+      period_cost_sgd?: number;
+      monthly_total_sgd?: number;
+    };
+    month_close?: {
+      closed?: boolean;
+      reason?: string;
+    };
+  };
+};
+
 export default function App() {
   const [currentRate, setCurrentRate] = useState<number | null>(null);
   const [data, setData] = useState<DisplayPayload | null>(null);
   const [loading, setLoading] = useState(true);
+  const [runningBillCycle, setRunningBillCycle] = useState(false);
+  const [billRunResult, setBillRunResult] = useState<CalculateBillRunPayload | null>(null);
+  const [billRunError, setBillRunError] = useState<string | null>(null);
+  const [dataMenuOpen, setDataMenuOpen] = useState(false);
 
   useEffect(() => {
     // 1. Fetch live electricity rate
@@ -41,6 +62,39 @@ export default function App() {
         setLoading(false);
       });
   }, []);
+
+  const runCalculateBill = async () => {
+    setRunningBillCycle(true);
+    setBillRunError(null);
+    setBillRunResult(null);
+
+    try {
+      const response = await fetch('/api/calculatebill/run', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: 1,
+          uid: DEMO_UID,
+          interval_minutes: 15,
+          sync_budget: true,
+        }),
+      });
+
+      const payload = (await response.json()) as CalculateBillRunPayload;
+      if (!response.ok || payload.success === false) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+
+      setBillRunResult(payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setBillRunError(message);
+    } finally {
+      setRunningBillCycle(false);
+    }
+  };
 
   const budget = data?.budget;
   const profile = data?.profile;
@@ -70,7 +124,48 @@ export default function App() {
           <nav className="px-3 space-y-0.5">
             <NavItem icon={<LayoutDashboard size={18} />} label="App Dashboard" active />
             <NavItem icon={<Server size={18} />} label="Endpoints" />
-            <NavItem icon={<Database size={18} />} label="Data" hasChevron />
+            
+            {/* Data Toggle */}
+            <button
+              onClick={() => setDataMenuOpen(!dataMenuOpen)}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-[14px] font-medium transition-colors ${
+                dataMenuOpen ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Database className={dataMenuOpen ? 'text-blue-600' : 'text-gray-400'} size={18} />
+                Data
+              </div>
+              <div className={`transform transition-transform duration-200 ${dataMenuOpen ? 'rotate-180' : ''}`}>
+                <ChevronDown className="w-4 h-4 text-gray-400" />
+              </div>
+            </button>
+
+            {/* Data Submenu */}
+            {dataMenuOpen && (
+              <div className="pl-6 space-y-0.5 bg-gray-50 rounded-md py-2">
+                <button
+                  onClick={runCalculateBill}
+                  disabled={runningBillCycle}
+                  className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-md text-[13px] font-medium text-gray-600 hover:text-gray-900 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  title="Sync current billing cycle with budget"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-4 h-4 flex items-center justify-center text-gray-400">
+                      {runningBillCycle ? '⟳' : '⟳'}
+                    </div>
+                    <span>{runningBillCycle ? 'Syncing...' : 'Sync Bill'}</span>
+                  </div>
+                  {billRunResult && !billRunError && (
+                    <div className="w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center x-sm text-white"></div>
+                  )}
+                  {billRunError && (
+                    <div className="w-4 h-4 rounded-full bg-rose-500 flex items-center justify-center text-xs text-white">✕</div>
+                  )}
+                </button>
+              </div>
+            )}
+
             <NavItem icon={<Wallet size={18} />} label="Budgets" />
             <NavItem icon={<Activity size={18} />} label="Transactions" hasChevron />
             <NavItem icon={<Layers size={18} />} label="Orchestrations" />

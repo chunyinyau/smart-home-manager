@@ -36,7 +36,7 @@ const budgetUserId = process.env.SMOKE_BUDGET_USER_ID ?? DEFAULT_BUDGET_USER_ID;
 const historyUserId = process.env.SMOKE_HISTORY_USER_ID ?? DEFAULT_HISTORY_USER_ID;
 
 const serviceBaseUrls = {
-  rate: resolveBaseUrl("http://localhost:5001", [
+  rate: resolveBaseUrl("http://localhost:5007", [
     "SMOKE_RATE_SERVICE_URL",
     "RATE_SERVICE_BASE_URL",
     "RATE_SERVICE_URL",

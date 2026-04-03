@@ -83,7 +83,7 @@ Optional environment variables:
 - `SMOKE_TIMEOUT_MS` (default: `15000`)
 - `SMOKE_BUDGET_USER_ID` (default: `1`)
 - `SMOKE_HISTORY_USER_ID` (default: `user_demo_001`)
-- `SMOKE_RATE_SERVICE_URL` (default: `http://localhost:5001`)
+- `SMOKE_RATE_SERVICE_URL` (default: `http://localhost:5007`)
 - `SMOKE_APPLIANCE_SERVICE_URL` (default: `http://localhost:5002`)
 - `SMOKE_BILL_SERVICE_URL` (default: `http://localhost:5003`)
 - `SMOKE_BUDGET_SERVICE_URL` (default: `http://localhost:5004`)

@@ -62,7 +62,7 @@ def to_positive_float(value: Any, fallback: float) -> float:
 
 
 APPLIANCE_SERVICE_URL = os.getenv("APPLIANCE_SERVICE_URL", "http://appliance_service:5002")
-RATE_SERVICE_URL = os.getenv("RATE_SERVICE_URL", "http://rate_service:5001")
+RATE_SERVICE_URL = os.getenv("RATE_SERVICE_URL", "http://rate_service:5007")
 BILL_SERVICE_URL = os.getenv("BILL_SERVICE_URL", "http://bill_service:5003")
 BUDGET_SERVICE_URL = os.getenv("BUDGET_SERVICE_URL", "http://budget_service:5004")
 REQUEST_TIMEOUT_SECONDS = to_positive_float(os.getenv("REQUEST_TIMEOUT_SECONDS"), 8.0)
@@ -87,9 +87,9 @@ SERVICE_FALLBACK_URLS = {
     ],
     "rate": [
         RATE_SERVICE_URL,
-        "http://host.docker.internal:5001",
-        "http://127.0.0.1:5001",
-        "http://localhost:5001",
+        "http://host.docker.internal:5007",
+        "http://127.0.0.1:5007",
+        "http://localhost:5007",
     ],
     "bill": [
         BILL_SERVICE_URL,

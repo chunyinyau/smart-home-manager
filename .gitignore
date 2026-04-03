@@ -44,3 +44,5 @@ next-env.d.ts
 
 # Ignore local microservice telemetry data
 appliance-service/data/appliance_telemetry_state.json
+appliance-service/data/appliance_energy_data.csv
+appliance-service/data/appliance_energy_data.json

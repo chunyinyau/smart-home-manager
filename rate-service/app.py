@@ -324,6 +324,6 @@ def wait_for_db(retries=10, delay=5):
 if __name__ == '__main__':
     if wait_for_db():
         print("Database connection established!")
-        app.run(host='0.0.0.0', port=5007, debug=is_debug_enabled())
+        app.run(host='0.0.0.0', port=5001, debug=is_debug_enabled())
     else:
         print("Could not connect to database after retries. Exiting.")

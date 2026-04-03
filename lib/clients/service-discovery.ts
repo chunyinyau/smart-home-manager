@@ -10,7 +10,7 @@ const SERVICE_CONFIG: Record<ServiceKey, ServiceConfig> = {
   rate: {
     envVars: ["RATE_SERVICE_BASE_URL", "RATE_SERVICE_URL"],
     dockerHost: "rate_service",
-    port: 5007,
+    port: 5001,
   },
   appliance: {
     envVars: ["APPLIANCE_SERVICE_BASE_URL", "APPLIANCE_SERVICE_URL"],

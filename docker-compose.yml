@@ -199,6 +199,36 @@ services:
       - budget_service
       - rate_service
 
+  # 14. Change Appliance State Composite Service (Port 5011 on host) - no DB
+  change_appliance_state_service:
+    build: ./change-appliance-state-service
+    restart: always
+    ports:
+      - "5011:5011"
+    environment:
+      - STATE_CHANGE_AUTOMATOR_SERVICE_URL=http://state_change_automator_service:5010
+      - HISTORY_SERVICE_URL=http://history_service:5005
+      - REQUEST_TIMEOUT_SECONDS=8
+      - DEFAULT_UID=user_demo_001
+    depends_on:
+      - history_service
+
+  # 15. State Change Automator Composite Service (Port 5010 on host) - no DB
+  state_change_automator_service:
+    build: ./state-change-automator-service
+    restart: always
+    ports:
+      - "5010:5010"
+    environment:
+      - APPLIANCE_SERVICE_URL=http://appliance_service:5002
+      - FORECASTBILL_SERVICE_URL=http://forecastbill_service:5009
+      - REQUEST_TIMEOUT_SECONDS=8
+      - DEFAULT_UID=user_demo_001
+      - DEFAULT_MAX_SHUTDOWNS=1
+    depends_on:
+      - appliance_service
+      - forecastbill_service
+
 volumes:
   rabbitmq_data:
   rate_db_data:

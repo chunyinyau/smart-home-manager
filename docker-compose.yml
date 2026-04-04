@@ -167,9 +167,10 @@ services:
       - REQUEST_TIMEOUT_SECONDS=8
       - DEFAULT_BILL_USER_ID=1
       - DEFAULT_APPLIANCE_UID=user_demo_001
-      - BILL_INTERVAL_MINUTES=15
+      - BILL_INTERVAL_MINUTES=5
       - SYNC_BUDGET_EACH_RUN=true
       - AUTO_CLOSE_AT_MONTH_END=false
+      - ENABLE_CALCULATEBILL_CRON=true
     depends_on:
       - appliance_service
       - rate_service

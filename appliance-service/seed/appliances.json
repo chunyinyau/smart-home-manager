@@ -2,45 +2,56 @@
   {
     "id": "app_1",
     "uid": "user_demo_001",
-    "name": "Main AC",
+    "name": "TV",
     "room": "Living Room",
-    "type": "Cooling",
+    "type": "Entertainment",
     "state": "ON",
-    "priority": 1,
-    "currentWatts": 2500,
-    "kwhUsed": 84.5
+    "priority": 3,
+    "currentWatts": 120,
+    "kwhUsed": 0
   },
   {
     "id": "app_2",
     "uid": "user_demo_001",
-    "name": "Server Rack",
-    "room": "Study",
-    "type": "Essential",
+    "name": "Air Con",
+    "room": "Bedroom",
+    "type": "Cooling",
     "state": "ON",
     "priority": 1,
-    "currentWatts": 800,
-    "kwhUsed": 52.3
+    "currentWatts": 1100,
+    "kwhUsed": 0
   },
   {
     "id": "app_3",
     "uid": "user_demo_001",
-    "name": "Entertainment Unit",
-    "room": "Living Room",
-    "type": "Non-Essential",
+    "name": "Lamp",
+    "room": "Study",
+    "type": "Lighting",
     "state": "ON",
-    "priority": 3,
-    "currentWatts": 450,
-    "kwhUsed": 23.1
+    "priority": 4,
+    "currentWatts": 15,
+    "kwhUsed": 0
   },
   {
     "id": "app_4",
     "uid": "user_demo_001",
-    "name": "Desk Lamp",
-    "room": "Study",
-    "type": "Non-Essential",
+    "name": "Fridge",
+    "room": "Kitchen",
+    "type": "Essential",
     "state": "ON",
-    "priority": 4,
-    "currentWatts": 60,
-    "kwhUsed": 4.9
+    "priority": 1,
+    "currentWatts": 160,
+    "kwhUsed": 0
+  },
+  {
+    "id": "app_5",
+    "uid": "user_demo_001",
+    "name": "Smart Panel",
+    "room": "Electrical Room",
+    "type": "Infrastructure",
+    "state": "ON",
+    "priority": 2,
+    "currentWatts": 25,
+    "kwhUsed": 0
   }
 ]

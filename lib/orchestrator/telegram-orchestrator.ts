@@ -1,5 +1,8 @@
 import { shutdownLowestPriorityAppliance } from "@/lib/services/automation/automation.service";
 import { getAppliances, shutdownAppliance } from "@/lib/services/appliance/appliance.service";
+import { getAppliances } from "@/lib/services/appliance/appliance.service";
+import { getBudgetStatus, updateMonthlyCap } from "@/lib/services/budget/budget.service";
+import { changeApplianceState } from "@/lib/services/change-appliance-state/change-appliance-state.service";
 import { getForecast } from "@/lib/services/forecast/forecast.service";
 import { getHistory, logHistory } from "@/lib/services/history/history.service";
 import { getUserProfile } from "@/lib/services/profile/profile.service";
@@ -178,18 +181,11 @@ export async function handleTelegramIntent(
   }
 
   if (intent === "shutdown") {
-    if (params.aid) {
-      const appliance = await shutdownAppliance(params.aid);
-      if (appliance) {
-        try {
-          await logHistory(uid, `User requested shutdown for ${appliance.name}.`);
-        } catch (error) {
-          console.warn("History logging failed after shutdown intent:", error);
-        }
-      }
-      return appliance;
-    }
-    return shutdownLowestPriorityAppliance(uid);
+    return changeApplianceState({
+      uid,
+      aid: params.aid,
+      targetState: "OFF",
+    });
   }
 
   if (intent === "history") {

@@ -1,7 +1,7 @@
 import type { RiskLevel } from "@/lib/shared/types";
 
-const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
-const DEFAULT_OPENAI_MODEL = process.env.PICOCLAW_MODEL ?? "gpt-5.4-mini";
+const AI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+const DEFAULT_AI_MODEL = process.env.PICOCLAW_MODEL ?? "gpt-5.4-mini";
 
 export interface PicoClawForecastInput {
   month: string;
@@ -150,7 +150,7 @@ function parseAssessment(outputText: string): PicoClawForecastAssessment | null 
   }
 }
 
-async function generateViaOpenAI(
+async function generateViaAI(
   input: PicoClawForecastInput,
 ): Promise<PicoClawForecastAssessment | null> {
   const apiKey = process.env.PICOCLAW_API_KEY;
@@ -170,14 +170,14 @@ async function generateViaOpenAI(
     JSON.stringify(input),
   ].join("\n");
 
-  const response = await fetch(OPENAI_RESPONSES_URL, {
+  const response = await fetch(AI_RESPONSES_URL, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: DEFAULT_OPENAI_MODEL,
+      model: DEFAULT_AI_MODEL,
       input: [
         {
           role: "user",
@@ -234,12 +234,12 @@ async function generateViaOpenAI(
       payload && typeof payload === "object"
         ? JSON.stringify(payload)
         : `HTTP ${response.status}`;
-    throw new Error(`PicoClaw OpenAI call failed: ${details}`);
+    throw new Error(`PicoClaw AI call failed: ${details}`);
   }
 
   const outputText = extractOutputText(payload);
   if (!outputText) {
-    throw new Error("PicoClaw OpenAI call succeeded but produced no text output.");
+    throw new Error("PicoClaw AI call succeeded but produced no text output.");
   }
 
   return parseAssessment(outputText);
@@ -249,7 +249,7 @@ export async function generateForecastReasoning(
   input: PicoClawForecastInput,
 ): Promise<PicoClawForecastAssessment> {
   try {
-    const aiAssessment = await generateViaOpenAI(input);
+    const aiAssessment = await generateViaAI(input);
     if (aiAssessment) {
       return aiAssessment;
     }

@@ -189,7 +189,7 @@ services:
     environment:
       - BILL_SERVICE_URL=http://bill_service:5003
       - BUDGET_SERVICE_URL=http://budget_service:5004
-      - RATE_SERVICE_URL=http://rate_service:5007
+      - PROFILE_SERVICE_URL=https://personal-2nbikeej.outsystemscloud.com/Profile/rest/Profile/profile
       - REQUEST_TIMEOUT_SECONDS=8
       - DEFAULT_BILL_USER_ID=1
       - DEFAULT_FORECAST_UID=user_demo_001
@@ -198,7 +198,6 @@ services:
     depends_on:
       - bill_service
       - budget_service
-      - rate_service
 
   # 14. Change Appliance State Composite Service (Port 5011 on host) - no DB
   change_appliance_state_service:

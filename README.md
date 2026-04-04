@@ -120,7 +120,7 @@ The app includes the following route handlers:
 The CalculateBill composite service runs as a Flask container on port `5008` and orchestrates:
 
 - `appliance-service` for live appliance load (`/api/appliance`)
-- `rate-service` for tariff (`/api/rate`)
+- tariff pricing (`/api/rate`) is handled by CalculateBill
 - `bill-service` for period bill persistence (`/api/bills`)
 - `budget-service` for cumulative monthly bill updates (`/api/budget/<user_id>`)
 
@@ -147,12 +147,16 @@ The ForecastBill composite service runs as a Flask container on port `5009` and 
 
 - `bill-service` for same-month spend history (`/api/bills`)
 - `budget-service` for budget cap and cumulative bill (`/api/budget/<user_id>`)
-- `rate-service` for current tariff (`/api/rate`)
-- `picoclaw/forecast.py` for PicoClaw AI assessment via OpenAI Responses API
+- `profile-service` for resident context (`/profile/<user_id>`)
+- `picoclaw/forecast.py` for PicoClaw AI assessment via AI Responses API
 
-Endpoint exposed by the composite service:
+Endpoints exposed by the composite service:
 
-- `GET /api/forecast` - returns assembled forecast payload with `riskLevel`, `daysToExceed`, and `shortNarrative`
+- `GET /api/forecast` - backward-compatible forecast retrieval by query params (`uid`, optional `user_id`, `profile_id`)
+- `POST /api/forecast` - plan-aligned composite call that aggregates Billing + Budget + Profile before invoking PicoClaw
+- `POST /api/forecastbill` - alias for `POST /api/forecast`
+
+Forecast response includes `projectedCost`, `projectedKwh`, `riskLevel`, `daysToExceed`, `shortNarrative`, and `recommendedAppliances`.
 
 ## RabbitMQ (History Events)
 

@@ -395,7 +395,7 @@ export default function App() {
                 <h2 className="text-lg font-bold text-gray-900">Forecast Outlook</h2>
               </div>
               <span className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                ForecastBill Service
+                Forecast
               </span>
             </div>
 

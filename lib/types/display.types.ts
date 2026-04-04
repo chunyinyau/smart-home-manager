@@ -18,6 +18,41 @@ export interface BudgetData {
   cum_bill: number;
 }
 
+export interface ForecastBillHistoryEntry {
+  billId: number;
+  periodCostSgd: number;
+  periodKwh: number;
+  computedAt: string;
+  billingPeriodStart: string;
+}
+
+export interface ForecastData {
+  uid: string;
+  userId: number;
+  month: string;
+  generatedAt: string;
+  projectedKwh: number;
+  projectedCost: number;
+  reasoning: string;
+  riskLevel: "SAFE" | "HIGH" | "CRITICAL";
+  daysToExceed: number | null;
+  shortNarrative: string;
+  billing: {
+    sameMonthSpendHistory: ForecastBillHistoryEntry[];
+    sameMonthSpendTotal: number;
+    sameMonthAverageDailySpend: number;
+  };
+  budget: {
+    budgetCap: number;
+    lastMonthCumulativeBill: number;
+  };
+  rate: {
+    monthYear: string;
+    centsPerKwh: number;
+    pricePerKwh: number;
+  };
+}
+
 export interface HistoryLog {
   log_id: number;
   user_id: string;
@@ -46,6 +81,7 @@ export interface DisplayPayload {
   profile_id: string;
   fetched_at: string;
   budget: BudgetData | null;
+  forecast: ForecastData | null;
   history: HistoryLog[] | null;
   bills: BillRecord[] | null;
   appliances: ApplianceRecord[] | null;

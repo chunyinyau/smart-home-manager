@@ -209,6 +209,7 @@ export default function App() {
   };
 
   const budget = data?.budget;
+  const forecast = data?.forecast;
   const fallbackMonth = new Date().toISOString().slice(0, 7);
   const displayedAccruedSpend = (() => {
     const persisted = Number(budget?.cum_bill ?? 0);
@@ -220,6 +221,12 @@ export default function App() {
   const profile = data?.profile;
   const history = data?.history || [];
   const cronUserState = cronState?.["1"];
+  const budgetStatusValue = forecast?.riskLevel ?? '---';
+  const budgetStatusColor =
+    !forecast ? 'text-gray-400' :
+    forecast.riskLevel === 'CRITICAL' ? 'text-rose-600' :
+    forecast.riskLevel === 'HIGH' ? 'text-amber-500' :
+    'text-emerald-600';
 
   return (
     <div className="flex h-screen bg-white text-gray-900 font-sans selection:bg-blue-100">
@@ -369,24 +376,74 @@ export default function App() {
               timeframe={`HDB Type ${profile?.hdb_type || '?'}`}
             />
             <MetricCard
-              value={
-                !budget ? '---' :
-                budget.cum_bill > budget.budget_cap ? 'CRITICAL' :
-                budget.cum_bill > budget.budget_cap * 0.8 ? 'WARNING' : 'SAFE'
-              }
+              value={budgetStatusValue}
               label="Budget Status"
               timeframe="Live Sync"
-              valueColor={
-                !budget ? 'text-gray-400' :
-                budget.cum_bill > budget.budget_cap ? 'text-rose-600' :
-                budget.cum_bill > budget.budget_cap * 0.8 ? 'text-amber-500' : 'text-emerald-600'
-              }
+              valueColor={budgetStatusColor}
             />
             <MetricCard 
               value={`$${budget?.budget_cap?.toFixed(0) || '---'}`} 
               label="Monthly Cap" 
               timeframe="User Setting" 
             />
+          </div>
+
+          <div className="mb-8 border border-gray-200 rounded-2xl bg-white p-6 shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between gap-3 mb-6 border-b border-gray-100 pb-4">
+              <div className="flex items-center gap-2">
+                <Activity className="w-5 h-5 text-amber-600" />
+                <h2 className="text-lg font-bold text-gray-900">Forecast Outlook</h2>
+              </div>
+              <span className="text-xs font-medium uppercase tracking-wider text-gray-400">
+                ForecastBill Service
+              </span>
+            </div>
+
+            {!forecast ? (
+              <div className="text-sm text-gray-500">Forecast data is not available yet.</div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-6">
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-5">
+                  <div className="text-xs uppercase tracking-wider text-gray-500">Short Narrative</div>
+                  <div className="mt-3 text-base font-medium leading-7 text-gray-800">
+                    {forecast.shortNarrative}
+                  </div>
+                  <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <ForecastStat
+                      label="Projected Spend"
+                      value={`$${forecast.projectedCost.toFixed(2)}`}
+                    />
+                    <ForecastStat
+                      label="Projected Usage"
+                      value={`${forecast.projectedKwh.toFixed(1)} kWh`}
+                    />
+                    <ForecastStat
+                      label="Days To Exceed"
+                      value={forecast.daysToExceed === null ? 'N/A' : String(forecast.daysToExceed)}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4">
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                    <div className="text-xs uppercase tracking-wider text-gray-500">Forecast Risk</div>
+                    <div className={`text-2xl font-semibold mt-2 ${budgetStatusColor}`}>
+                      {forecast.riskLevel}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                    <div className="text-xs uppercase tracking-wider text-gray-500">Month</div>
+                    <div className="text-xl font-semibold text-gray-900 mt-2">{forecast.month}</div>
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                    <div className="text-xs uppercase tracking-wider text-gray-500">Generated At</div>
+                    <div className="text-sm font-semibold text-gray-900 mt-2">
+                      {new Date(forecast.generatedAt).toLocaleString()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 gap-6 mb-8">
@@ -520,6 +577,15 @@ function MetricCard({ value, label, timeframe, valueColor = 'text-gray-900' }: {
         <span className="text-sm font-medium text-gray-900 truncate">{label}</span>
         <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wider">{timeframe}</span>
       </div>
+    </div>
+  );
+}
+
+function ForecastStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-4">
+      <div className="text-xs uppercase tracking-wider text-gray-500">{label}</div>
+      <div className="mt-2 text-xl font-semibold text-gray-900">{value}</div>
     </div>
   );
 }

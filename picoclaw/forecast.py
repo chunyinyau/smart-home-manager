@@ -158,24 +158,24 @@ def _build_short_narrative(
 
     if risk_level == "CRITICAL":
         return (
-            f"Linear regression projects month-end spend at {projected_month_end_cost:.2f} SGD, "
+            f"Projected month-end spend at {projected_month_end_cost:.2f} SGD, "
             f"about {abs(delta_cost):.2f} SGD above budget; immediate load reduction is recommended."
         )
 
     if risk_level == "HIGH":
         return (
-            f"Projected spend is {projected_month_end_cost:.2f} SGD and is nearing your cap; "
+            f"Projected month-end spend is {projected_month_end_cost:.2f} SGD and is nearing your cap; "
             "target high-draw appliances now to avoid crossing the budget."
         )
 
     if delta_kwh > 0:
         return (
-            f"Projected spend stays within budget at {projected_month_end_cost:.2f} SGD, "
+            f"Projected month-end spend stays within budget at {projected_month_end_cost:.2f} SGD, "
             f"but expected usage is {delta_kwh:.1f} kWh above baseline, so keep usage stable."
         )
 
     return (
-        f"Projected spend is {projected_month_end_cost:.2f} SGD and remains safely under budget "
+        f"Projected month-end spend is {projected_month_end_cost:.2f} SGD and remains safely under budget "
         "with current consumption trends."
     )
 

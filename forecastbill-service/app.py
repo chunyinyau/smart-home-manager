@@ -543,7 +543,7 @@ def get_ai_assessment(
     try:
         api_key, api_key_source = resolve_picoclaw_api_key()
         if api_key and api_key_source:
-            print(f"ForecastBill PicoClaw request starting; key={api_key_source}", flush=True)
+            print("ForecastBill PicoClaw request starting", flush=True)
         else:
             print("ForecastBill PicoClaw request starting; key=not-set (local mode)", flush=True)
         result = run_forecast_check(ai_input)

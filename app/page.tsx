@@ -395,7 +395,7 @@ export default function App() {
                 <h2 className="text-lg font-bold text-gray-900">Forecast Outlook</h2>
               </div>
               <span className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                ForecastBill Service
+                Forecast
               </span>
             </div>
 
@@ -404,7 +404,7 @@ export default function App() {
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-6">
                 <div className="rounded-xl border border-gray-200 bg-gray-50 p-5">
-                  <div className="text-xs uppercase tracking-wider text-gray-500">Short Narrative</div>
+                  <div className="text-xs uppercase tracking-wider text-gray-500">Recommendation</div>
                   <div className="mt-3 text-base font-medium leading-7 text-gray-800">
                     {forecast.shortNarrative}
                   </div>

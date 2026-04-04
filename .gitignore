@@ -14,7 +14,7 @@
 /coverage
 
 # python
-__pycache__/*
+__pycache__/
 
 # next.js
 /.next/

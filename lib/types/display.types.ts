@@ -30,6 +30,7 @@ export interface ForecastData {
   uid: string;
   userId: number;
   month: string;
+  billingPeriodStart?: string;
   generatedAt: string;
   projectedKwh: number;
   projectedCost: number;
@@ -37,14 +38,29 @@ export interface ForecastData {
   riskLevel: "SAFE" | "HIGH" | "CRITICAL";
   daysToExceed: number | null;
   shortNarrative: string;
+  recommendedAppliances?: string[];
+  recommendations?: string[];
+  model?: Record<string, unknown>;
   billing: {
+    currentPeriodHistory?: ForecastBillHistoryEntry[];
+    currentPeriodTotalCost?: number;
+    currentPeriodTotalKwh?: number;
+    daysElapsed?: number;
+    daysRemaining?: number;
     sameMonthSpendHistory: ForecastBillHistoryEntry[];
     sameMonthSpendTotal: number;
     sameMonthAverageDailySpend: number;
   };
   budget: {
     budgetCap: number;
+    currentCumulativeBill?: number;
     lastMonthCumulativeBill: number;
+  };
+  profile?: {
+    profileId: string;
+    hdbType: string;
+    baselineMonthlyKwh: number;
+    source?: string;
   };
   rate: {
     monthYear: string;

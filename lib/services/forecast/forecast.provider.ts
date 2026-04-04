@@ -1,10 +1,8 @@
-import { generateForecastReasoning } from "@/lib/clients/picoclaw.client";
+import {
+  generateForecastReasoning,
+  type PicoClawForecastInput,
+} from "@/lib/clients/picoclaw.client";
 
-export async function getForecastPrediction(input: {
-  baselineKwh: number;
-  activeCount: number;
-  totalKwh: number;
-  pricePerKwh: number;
-}) {
+export async function getForecastPrediction(input: PicoClawForecastInput) {
   return generateForecastReasoning(input);
 }

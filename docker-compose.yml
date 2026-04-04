@@ -145,6 +145,7 @@ services:
       - HISTORY_SERVICE_URL=http://history_service:5005
       - BILL_SERVICE_URL=http://bill_service:5003
       - APPLIANCE_SERVICE_URL=http://appliance_service:5002
+      - FORECAST_SERVICE_URL=http://forecastbill_service:5009
       - PROFILE_SERVICE_URL=https://personal-2nbikeej.outsystemscloud.com/Profile/rest/Profile/profile
       - REQUEST_TIMEOUT_SECONDS=8
     depends_on:

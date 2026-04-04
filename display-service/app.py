@@ -14,6 +14,7 @@ BUDGET_SERVICE_URL    = os.getenv("BUDGET_SERVICE_URL",    "http://budget_servic
 HISTORY_SERVICE_URL   = os.getenv("HISTORY_SERVICE_URL",   "http://history_service:5005")
 BILL_SERVICE_URL      = os.getenv("BILL_SERVICE_URL",      "http://bill_service:5003")
 APPLIANCE_SERVICE_URL = os.getenv("APPLIANCE_SERVICE_URL", "http://appliance_service:5002")
+FORECAST_SERVICE_URL  = os.getenv("FORECAST_SERVICE_URL",  "http://forecastbill_service:5009")
 PROFILE_SERVICE_URL   = os.getenv(
     "PROFILE_SERVICE_URL",
     "https://personal-2nbikeej.outsystemscloud.com/Profile/rest/Profile/profile",
@@ -45,6 +46,12 @@ SERVICE_FALLBACK_URLS = {
         "http://host.docker.internal:5002",
         "http://127.0.0.1:5002",
         "http://localhost:5002",
+    ],
+    "forecast": [
+        FORECAST_SERVICE_URL,
+        "http://host.docker.internal:5009",
+        "http://127.0.0.1:5009",
+        "http://localhost:5009",
     ],
 }
 
@@ -172,6 +179,17 @@ def fetch_profile(profile_id: str) -> dict:
         return {"data": None, "error": str(e)}
 
 
+def fetch_forecast(user_id: str) -> dict:
+    """GET /api/forecast?uid=<user_id> from forecastbill-service."""
+    try:
+        resp = request_with_fallback("forecast", "/api/forecast", params={"uid": user_id})
+        if resp.status_code == 200:
+            return {"data": resp.json(), "error": None}
+        return {"data": None, "error": f"forecastbill-service returned {resp.status_code}"}
+    except Exception as e:
+        return {"data": None, "error": str(e)}
+
+
 # ==========================================
 # API Routes
 # ==========================================
@@ -181,7 +199,7 @@ def home():
         "status": "online",
         "service": "Display Composite Microservice",
         "endpoints": ["GET /api/display"],
-        "aggregates": ["budget", "history", "bills", "profile"],
+        "aggregates": ["budget", "forecast", "history", "bills", "appliances", "profile"],
     })
 
 
@@ -200,6 +218,7 @@ def display():
 
     tasks = {
         "budget":     (fetch_budget,     uid),
+        "forecast":   (fetch_forecast,   uid),
         "history":    (fetch_history,    uid),
         "bills":      (fetch_bills,      uid),
         "appliances": (fetch_appliances, uid),
@@ -207,7 +226,7 @@ def display():
     }
 
     results = {}
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=6) as executor:
         futures = {
             executor.submit(fn, arg): key
             for key, (fn, arg) in tasks.items()
@@ -225,6 +244,7 @@ def display():
         "profile_id":  profile_id,
         "fetched_at":  datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "budget":      results.get("budget",     {}).get("data"),
+        "forecast":    results.get("forecast",   {}).get("data"),
         "history":     results.get("history",    {}).get("data"),
         "bills":       results.get("bills",      {}).get("data"),
         "appliances":  results.get("appliances", {}).get("data"),

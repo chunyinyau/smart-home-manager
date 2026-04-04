@@ -52,6 +52,7 @@ export default function App() {
   const [billRunResult, setBillRunResult] = useState<CalculateBillRunPayload | null>(null);
   const [billRunError, setBillRunError] = useState<string | null>(null);
   const [dataMenuOpen, setDataMenuOpen] = useState(false);
+  const [suggestedActionsOpen, setSuggestedActionsOpen] = useState(false);
   const [cronState, setCronState] = useState<CalculateBillStatePayload["data"] | null>(null);
   const [cronStateLoading, setCronStateLoading] = useState(true);
   const [cronStateError, setCronStateError] = useState<string | null>(null);
@@ -227,6 +228,16 @@ export default function App() {
     forecast.riskLevel === 'CRITICAL' ? 'text-rose-600' :
     forecast.riskLevel === 'HIGH' ? 'text-amber-500' :
     'text-emerald-600';
+  const suggestedAppliances = Array.from(
+    new Set(
+      [
+        ...(Array.isArray(forecast?.recommendedAppliances) ? forecast.recommendedAppliances : []),
+        ...(Array.isArray(forecast?.recommendations) ? forecast.recommendations : []),
+      ]
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter((item) => item.length > 0),
+    ),
+  );
 
   return (
     <div className="flex h-screen bg-white text-gray-900 font-sans selection:bg-blue-100">
@@ -402,44 +413,87 @@ export default function App() {
             {!forecast ? (
               <div className="text-sm text-gray-500">Forecast data is not available yet.</div>
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-6">
-                <div className="rounded-xl border border-gray-200 bg-gray-50 p-5">
-                  <div className="text-xs uppercase tracking-wider text-gray-500">Recommendation</div>
-                  <div className="mt-3 text-base font-medium leading-7 text-gray-800">
-                    {forecast.shortNarrative}
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-6">
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-5">
+                    <div className="text-xs uppercase tracking-wider text-gray-500">Recommendation</div>
+                    <div className="mt-3 text-base font-medium leading-7 text-gray-800">
+                      {forecast.shortNarrative}
+                    </div>
+                    <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <ForecastStat
+                        label="Projected Spend"
+                        value={`$${forecast.projectedCost.toFixed(2)}`}
+                      />
+                      <ForecastStat
+                        label="Projected Usage"
+                        value={`${forecast.projectedKwh.toFixed(1)} kWh`}
+                      />
+                      <ForecastStat
+                        label="Days To Exceed"
+                        value={forecast.daysToExceed === null ? 'N/A' : String(forecast.daysToExceed)}
+                      />
+                    </div>
                   </div>
-                  <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <ForecastStat
-                      label="Projected Spend"
-                      value={`$${forecast.projectedCost.toFixed(2)}`}
-                    />
-                    <ForecastStat
-                      label="Projected Usage"
-                      value={`${forecast.projectedKwh.toFixed(1)} kWh`}
-                    />
-                    <ForecastStat
-                      label="Days To Exceed"
-                      value={forecast.daysToExceed === null ? 'N/A' : String(forecast.daysToExceed)}
-                    />
+
+                  <div className="grid grid-cols-1 gap-4">
+                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="text-xs uppercase tracking-wider text-gray-500">Forecast Risk</div>
+                      <div className={`text-2xl font-semibold mt-2 ${budgetStatusColor}`}>
+                        {forecast.riskLevel}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="text-xs uppercase tracking-wider text-gray-500">Month</div>
+                      <div className="text-xl font-semibold text-gray-900 mt-2">{forecast.month}</div>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="text-xs uppercase tracking-wider text-gray-500">Generated At</div>
+                      <div className="text-sm font-semibold text-gray-900 mt-2">
+                        {new Date(forecast.generatedAt).toLocaleString()}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-4">
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                    <div className="text-xs uppercase tracking-wider text-gray-500">Forecast Risk</div>
-                    <div className={`text-2xl font-semibold mt-2 ${budgetStatusColor}`}>
-                      {forecast.riskLevel}
+                <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+                  <button
+                    type="button"
+                    onClick={() => setSuggestedActionsOpen((open) => !open)}
+                    aria-expanded={suggestedActionsOpen}
+                    aria-controls="suggested-actions-panel"
+                    className="w-full flex items-center justify-between gap-3 text-left"
+                  >
+                    <div>
+                      <div className="text-xs uppercase tracking-wider text-blue-600">Suggested Actions</div>
+                      <div className="mt-1 text-sm font-semibold text-blue-700">Appliances to Turn Off</div>
                     </div>
-                  </div>
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                    <div className="text-xs uppercase tracking-wider text-gray-500">Month</div>
-                    <div className="text-xl font-semibold text-gray-900 mt-2">{forecast.month}</div>
-                  </div>
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                    <div className="text-xs uppercase tracking-wider text-gray-500">Generated At</div>
-                    <div className="text-sm font-semibold text-gray-900 mt-2">
-                      {new Date(forecast.generatedAt).toLocaleString()}
-                    </div>
+                    <ChevronDown
+                      className={`w-5 h-5 text-blue-600 transition-transform duration-300 ${
+                        suggestedActionsOpen ? 'rotate-180' : 'rotate-0'
+                      }`}
+                    />
+                  </button>
+
+                  <div
+                    id="suggested-actions-panel"
+                    className={`overflow-hidden transition-all duration-300 ease-in-out ${
+                      suggestedActionsOpen
+                        ? 'max-h-96 opacity-100 mt-4 pt-3 border-t border-blue-200'
+                        : 'max-h-0 opacity-0'
+                    }`}
+                  >
+                    {suggestedAppliances.length === 0 ? (
+                      <div className="text-sm text-blue-600/80">No appliance shutdown suggestions available yet.</div>
+                    ) : (
+                      <ul className="space-y-2">
+                        {suggestedAppliances.map((item) => (
+                          <li key={item} className="text-sm text-blue-700 leading-6">
+                            • {item}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 </div>
               </div>

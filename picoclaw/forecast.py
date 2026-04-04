@@ -11,6 +11,7 @@ from typing import Any
 
 AI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 DEFAULT_MODEL = os.getenv("PICOCLAW_MODEL", "gpt-5.4-mini")
+NARRATIVE_MAX_CHARS = 240
 logger = logging.getLogger(__name__)
 
 
@@ -158,25 +159,29 @@ def _build_short_narrative(
 
     if risk_level == "CRITICAL":
         return (
-            f"Projected month-end spend at {projected_month_end_cost:.2f} SGD, "
-            f"about {abs(delta_cost):.2f} SGD above budget; immediate load reduction is recommended."
+            f"Projected month-end spend is {projected_month_end_cost:.2f} SGD, "
+            f"about {abs(delta_cost):.2f} SGD above budget. At this pace, the overrun is likely "
+            "within the next two weeks, so reduce high-draw appliance runtime and stagger heavy loads now."
         )
 
     if risk_level == "HIGH":
         return (
-            f"Projected month-end spend is {projected_month_end_cost:.2f} SGD and is nearing your cap; "
-            "target high-draw appliances now to avoid crossing the budget."
+            f"Projected month-end spend is {projected_month_end_cost:.2f} SGD and is nearing your cap. "
+            "You can still recover, but sustained peak usage may push you over budget, so trim air-con "
+            "runtime and avoid stacking heavy appliances in the same window."
         )
 
     if delta_kwh > 0:
         return (
-            f"Projected month-end spend stays within budget at {projected_month_end_cost:.2f} SGD, "
-            f"but expected usage is {delta_kwh:.1f} kWh above baseline, so keep usage stable."
+            f"Projected month-end spend remains within budget at {projected_month_end_cost:.2f} SGD, "
+            f"but usage is about {delta_kwh:.1f} kWh above baseline. Keep current discipline and trim "
+            "avoidable standby loads to preserve your buffer."
         )
 
     return (
         f"Projected month-end spend is {projected_month_end_cost:.2f} SGD and remains safely under budget "
-        "with current consumption trends."
+        "with current trends. Maintain this pace through the final week and avoid unnecessary peak-hour "
+        "appliance overlap to protect your margin."
     )
 
 
@@ -460,13 +465,21 @@ def _parse_llm_refinement(output_text: str) -> dict[str, Any] | None:
     short_narrative = parsed.get("short_narrative")
     recommendations = _sanitize_recommendations(parsed.get("recommended_appliances"))
 
-    if not isinstance(short_narrative, str) or len(short_narrative.strip()) < 12:
+    if not isinstance(short_narrative, str):
+        return None
+
+    normalized_narrative = " ".join(short_narrative.split())
+    if len(normalized_narrative) < 12 or len(normalized_narrative) > NARRATIVE_MAX_CHARS:
+        return None
+    if normalized_narrative.endswith("..."):
+        return None
+    if normalized_narrative[-1] not in {".", "!", "?"}:
         return None
     if len(recommendations) < 2:
         return None
 
     return {
-        "short_narrative": short_narrative.strip(),
+        "short_narrative": normalized_narrative,
         "recommended_appliances": recommendations,
     }
 
@@ -492,6 +505,9 @@ def _enhance_with_ai(
             "Given deterministic linear-regression results, refine only messaging.",
             "Do not change numeric forecast values or risk level.",
             "Return JSON only with keys: short_narrative, recommended_appliances.",
+            "short_narrative must be natural and complete, written as one to two full sentences.",
+            "Do not truncate, do not use ellipsis, and do not end mid-sentence.",
+            "Target roughly 140-230 characters and always keep under 250 characters.",
             "recommended_appliances must be 2 to 5 practical appliance-focused suggestions.",
             "Deterministic result:",
             json.dumps(deterministic_assessment),
@@ -523,8 +539,8 @@ def _enhance_with_ai(
                     "properties": {
                         "short_narrative": {
                             "type": "string",
-                            "minLength": 12,
-                            "maxLength": 220,
+                            "minLength": 80,
+                            "maxLength": NARRATIVE_MAX_CHARS,
                         },
                         "recommended_appliances": {
                             "type": "array",

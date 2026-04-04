@@ -36,11 +36,6 @@ const budgetUserId = process.env.SMOKE_BUDGET_USER_ID ?? DEFAULT_BUDGET_USER_ID;
 const historyUserId = process.env.SMOKE_HISTORY_USER_ID ?? DEFAULT_HISTORY_USER_ID;
 
 const serviceBaseUrls = {
-  rate: resolveBaseUrl("http://localhost:5007", [
-    "SMOKE_RATE_SERVICE_URL",
-    "RATE_SERVICE_BASE_URL",
-    "RATE_SERVICE_URL",
-  ]),
   appliance: resolveBaseUrl("http://localhost:5002", [
     "SMOKE_APPLIANCE_SERVICE_URL",
     "APPLIANCE_SERVICE_BASE_URL",
@@ -61,10 +56,20 @@ const serviceBaseUrls = {
     "HISTORY_SERVICE_BASE_URL",
     "HISTORY_SERVICE_URL",
   ]),
+  rate: resolveBaseUrl("http://localhost:5007", [
+    "SMOKE_RATE_SERVICE_URL",
+    "RATE_SERVICE_BASE_URL",
+    "RATE_SERVICE_URL",
+  ]),
   calculatebill: resolveBaseUrl("http://localhost:5008", [
     "SMOKE_CALCULATEBILL_SERVICE_URL",
     "CALCULATEBILL_SERVICE_BASE_URL",
     "CALCULATEBILL_SERVICE_URL",
+  ]),
+  forecastbill: resolveBaseUrl("http://localhost:5009", [
+    "SMOKE_FORECASTBILL_SERVICE_URL",
+    "FORECASTBILL_SERVICE_BASE_URL",
+    "FORECASTBILL_SERVICE_URL",
   ]),
 };
 
@@ -115,11 +120,11 @@ const checks = [
     toleratedStatuses: [],
   },
   {
-    name: "Rate Service Read",
+    name: "App Forecast Read",
     method: "GET",
-    path: "/api/rate",
-    baseUrl: serviceBaseUrls.rate,
-    label: "rate-service",
+    path: `/api/forecast?uid=${encodeURIComponent(historyUserId)}`,
+    baseUrl,
+    label: "Next API",
     expectedStatuses: [200],
     toleratedStatuses: [],
   },
@@ -160,11 +165,29 @@ const checks = [
     toleratedStatuses: [],
   },
   {
+    name: "Rate Service Read",
+    method: "GET",
+    path: "/api/rate",
+    baseUrl: serviceBaseUrls.rate,
+    label: "rate-service",
+    expectedStatuses: [200],
+    toleratedStatuses: [],
+  },
+  {
     name: "CalculateBill Service State",
     method: "GET",
     path: "/api/calculatebill/state",
     baseUrl: serviceBaseUrls.calculatebill,
     label: "calculatebill-service",
+    expectedStatuses: [200],
+    toleratedStatuses: [],
+  },
+  {
+    name: "ForecastBill Service Read",
+    method: "GET",
+    path: `/api/forecast?uid=${encodeURIComponent(historyUserId)}`,
+    baseUrl: serviceBaseUrls.forecastbill,
+    label: "forecastbill-service",
     expectedStatuses: [200],
     toleratedStatuses: [],
   },
@@ -284,12 +307,13 @@ async function main() {
   console.log("Smart Home Manager API smoke test");
   console.log(`Next API Base URL: ${baseUrl}`);
   console.log("Service Base URLs:");
-  console.log(`- rate-service: ${serviceBaseUrls.rate}`);
   console.log(`- appliance-service: ${serviceBaseUrls.appliance}`);
   console.log(`- bill-service: ${serviceBaseUrls.bill}`);
   console.log(`- budget-service: ${serviceBaseUrls.budget}`);
   console.log(`- history-service: ${serviceBaseUrls.history}`);
+  console.log(`- rate-service: ${serviceBaseUrls.rate}`);
   console.log(`- calculatebill-service: ${serviceBaseUrls.calculatebill}`);
+  console.log(`- forecastbill-service: ${serviceBaseUrls.forecastbill}`);
   console.log(`Timeout: ${timeoutMs}ms`);
   console.log("");
 

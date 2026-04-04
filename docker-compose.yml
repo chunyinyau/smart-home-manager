@@ -177,6 +177,28 @@ services:
       - bill_service
       - budget_service
 
+  # 13. ForecastBill Composite Service (Port 5009 on host) - no DB
+  forecastbill_service:
+    build:
+      context: .
+      dockerfile: forecastbill-service/Dockerfile
+    restart: always
+    ports:
+      - "5009:5009"
+    environment:
+      - BILL_SERVICE_URL=http://bill_service:5003
+      - BUDGET_SERVICE_URL=http://budget_service:5004
+      - RATE_SERVICE_URL=http://rate_service:5007
+      - REQUEST_TIMEOUT_SECONDS=8
+      - DEFAULT_BILL_USER_ID=1
+      - DEFAULT_FORECAST_UID=user_demo_001
+      - PICOCLAW_API_KEY=${PICOCLAW_API_KEY:-}
+      - PICOCLAW_MODEL=${PICOCLAW_MODEL:-gpt-5.4-mini}
+    depends_on:
+      - bill_service
+      - budget_service
+      - rate_service
+
 volumes:
   rabbitmq_data:
   rate_db_data:

@@ -2,9 +2,11 @@ import csv
 import json
 import threading
 import time
+from datetime import datetime, timedelta
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 
 _NUMERIC_FIELDS = {
@@ -20,6 +22,14 @@ _NUMERIC_FIELDS = {
     "smart_panel_wh",
     "total_slice_kwh",
 }
+
+_DEVICE_WATTS_FIELDS = (
+    "tv_w",
+    "air_conditioning_w",
+    "light_w",
+    "fridge_w",
+    "smart_panel_w",
+)
 
 
 @dataclass(frozen=True)
@@ -163,3 +173,72 @@ class TelemetryReplayStore:
             "currentRow": snapshot.row,
             "nextRow": next_row,
         }
+
+    def accrual_for_current_sgt(self) -> dict[str, Any]:
+        """Compute month-to-date kWh accrual up to the current SGT 5-minute slot."""
+        with self._lock:
+            if not self._rows:
+                return {
+                    "matched": False,
+                    "matchedIndex": 0,
+                    "matchedTimestamp": None,
+                    "monthKey": None,
+                    "accruedSliceKwh": 0.0,
+                    "perDeviceAccruedKwh": {field: 0.0 for field in _DEVICE_WATTS_FIELDS},
+                    "totalRows": 0,
+                }
+
+            now_sgt = datetime.now(ZoneInfo("Asia/Singapore")).replace(second=0, microsecond=0)
+            now_sgt = now_sgt - timedelta(minutes=now_sgt.minute % 5)
+            target_naive = now_sgt.replace(tzinfo=None)
+            month_key = target_naive.strftime("%Y-%m")
+
+            matched_index = 0
+            matched_timestamp = None
+            for index, row in enumerate(self._rows):
+                timestamp_raw = row.get("timestamp")
+                if not isinstance(timestamp_raw, str):
+                    continue
+                try:
+                    row_ts = datetime.strptime(timestamp_raw, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    continue
+                if row_ts <= target_naive:
+                    matched_index = index
+                    matched_timestamp = timestamp_raw
+                else:
+                    break
+
+            accrued_kwh = 0.0
+            per_device_kwh = {field: 0.0 for field in _DEVICE_WATTS_FIELDS}
+            for index, row in enumerate(self._rows):
+                if index > matched_index:
+                    break
+                timestamp_raw = row.get("timestamp")
+                if not isinstance(timestamp_raw, str) or not timestamp_raw.startswith(month_key):
+                    continue
+                slice_kwh = row.get("total_slice_kwh", 0.0)
+                try:
+                    accrued_kwh += float(slice_kwh)
+                except (TypeError, ValueError):
+                    continue
+
+                for field in _DEVICE_WATTS_FIELDS:
+                    watts_value = row.get(field, 0.0)
+                    try:
+                        per_device_kwh[field] += (float(watts_value) * (5 / 60.0)) / 1000.0
+                    except (TypeError, ValueError):
+                        continue
+
+            return {
+                "matched": matched_timestamp is not None,
+                "matchedIndex": matched_index,
+                "matchedTimestamp": matched_timestamp,
+                "monthKey": month_key,
+                "accruedSliceKwh": round(accrued_kwh, 6),
+                "perDeviceAccruedKwh": {
+                    field: round(value, 6)
+                    for field, value in per_device_kwh.items()
+                },
+                "totalRows": len(self._rows),
+            }

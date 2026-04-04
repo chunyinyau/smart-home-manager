@@ -52,6 +52,49 @@ telemetry_store = TelemetryReplayStore(
     interval_seconds=int(os.getenv("APPLIANCE_REPLAY_INTERVAL_SECONDS", "300")),
 )
 
+TELEMETRY_APPLIANCE_PROFILES = [
+    {
+        "id": "app_1",
+        "name": "TV",
+        "room": "Living Room",
+        "type": "Entertainment",
+        "priority": 3,
+        "watts_key": "tv_w",
+    },
+    {
+        "id": "app_2",
+        "name": "Air Con",
+        "room": "Bedroom",
+        "type": "Cooling",
+        "priority": 1,
+        "watts_key": "air_conditioning_w",
+    },
+    {
+        "id": "app_3",
+        "name": "Lamp",
+        "room": "Study",
+        "type": "Lighting",
+        "priority": 4,
+        "watts_key": "light_w",
+    },
+    {
+        "id": "app_4",
+        "name": "Fridge",
+        "room": "Kitchen",
+        "type": "Essential",
+        "priority": 1,
+        "watts_key": "fridge_w",
+    },
+    {
+        "id": "app_5",
+        "name": "Smart Panel",
+        "room": "Electrical Room",
+        "type": "Infrastructure",
+        "priority": 2,
+        "watts_key": "smart_panel_w",
+    },
+]
+
 
 class Appliance(db.Model):
     __tablename__ = "appliances"
@@ -95,48 +138,126 @@ def default_seed_appliances() -> list[dict[str, object]]:
         {
             "id": "app_1",
             "uid": DEMO_UID,
-            "name": "Main AC",
+            "name": "TV",
             "room": "Living Room",
-            "type": "Cooling",
+            "type": "Entertainment",
             "state": "ON",
-            "priority": 1,
-            "currentWatts": 2500,
-            "kwhUsed": 84.5,
+            "priority": 3,
+            "currentWatts": 120,
+            "kwhUsed": 0,
         },
         {
             "id": "app_2",
             "uid": DEMO_UID,
-            "name": "Server Rack",
-            "room": "Study",
-            "type": "Essential",
+            "name": "Air Con",
+            "room": "Bedroom",
+            "type": "Cooling",
             "state": "ON",
             "priority": 1,
-            "currentWatts": 800,
-            "kwhUsed": 52.3,
+            "currentWatts": 1100,
+            "kwhUsed": 0,
         },
         {
             "id": "app_3",
             "uid": DEMO_UID,
-            "name": "Entertainment Unit",
-            "room": "Living Room",
-            "type": "Non-Essential",
+            "name": "Lamp",
+            "room": "Study",
+            "type": "Lighting",
             "state": "ON",
-            "priority": 3,
-            "currentWatts": 450,
-            "kwhUsed": 23.1,
+            "priority": 4,
+            "currentWatts": 15,
+            "kwhUsed": 0,
         },
         {
             "id": "app_4",
             "uid": DEMO_UID,
-            "name": "Desk Lamp",
-            "room": "Study",
-            "type": "Non-Essential",
+            "name": "Fridge",
+            "room": "Kitchen",
+            "type": "Essential",
             "state": "ON",
-            "priority": 4,
-            "currentWatts": 60,
-            "kwhUsed": 4.9,
+            "priority": 1,
+            "currentWatts": 160,
+            "kwhUsed": 0,
+        },
+        {
+            "id": "app_5",
+            "uid": DEMO_UID,
+            "name": "Smart Panel",
+            "room": "Electrical Room",
+            "type": "Infrastructure",
+            "state": "ON",
+            "priority": 2,
+            "currentWatts": 25,
+            "kwhUsed": 0,
         },
     ]
+
+
+def _to_non_negative_int(value: object) -> int:
+    try:
+        parsed = int(float(value))
+        return max(parsed, 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def sync_appliances_from_telemetry(uid: str) -> None:
+    snapshot = telemetry_store.current()
+    if snapshot.row is None:
+        return
+
+    telemetry_row = snapshot.row
+    accrual = telemetry_store.accrual_for_current_sgt()
+    per_device_accrued = accrual.get("perDeviceAccruedKwh", {}) if isinstance(accrual, dict) else {}
+    tracked_ids = {profile["id"] for profile in TELEMETRY_APPLIANCE_PROFILES}
+
+    existing = {
+        appliance.id: appliance
+        for appliance in Appliance.query.filter_by(uid=uid).all()
+    }
+
+    # Keep only the five canonical website appliances.
+    for appliance_id, appliance in list(existing.items()):
+        if appliance_id not in tracked_ids:
+            db.session.delete(appliance)
+
+    now_ts = current_timestamp()
+    for profile in TELEMETRY_APPLIANCE_PROFILES:
+        watts = _to_non_negative_int(telemetry_row.get(profile["watts_key"], 0))
+        kwh_used = 0.0
+        try:
+            kwh_used = round(float(per_device_accrued.get(profile["watts_key"], 0.0)), 4)
+        except (TypeError, ValueError):
+            kwh_used = 0.0
+        state = "ON" if watts > 0 else "OFF"
+
+        appliance = existing.get(profile["id"])
+        if appliance is None:
+            appliance = Appliance(
+                id=profile["id"],
+                uid=uid,
+                name=profile["name"],
+                room=profile["room"],
+                type=profile["type"],
+                state=state,
+                priority=profile["priority"],
+                current_watts=watts,
+                kwh_used=kwh_used,
+                last_seen_at=now_ts,
+            )
+            db.session.add(appliance)
+            continue
+
+        appliance.name = profile["name"]
+        appliance.room = profile["room"]
+        appliance.type = profile["type"]
+        appliance.priority = profile["priority"]
+        appliance.state = state
+        appliance.current_watts = watts
+        appliance.kwh_used = kwh_used
+        appliance.last_seen_at = now_ts
+
+    db.session.commit()
 
 
 def load_seed_appliances() -> list[dict[str, object]]:
@@ -207,6 +328,7 @@ def home():
 @app.route("/api/appliance", methods=["GET"])
 def get_appliances():
     uid = request.args.get("uid", DEMO_UID)
+    sync_appliances_from_telemetry(uid)
     appliances = (
         Appliance.query.filter_by(uid=uid)
         .order_by(Appliance.priority.asc(), Appliance.id.asc())
@@ -259,6 +381,7 @@ def update_priority(aid: str):
 @app.route("/api/appliance/summary", methods=["GET"])
 def appliance_summary():
     uid = request.args.get("uid", DEMO_UID)
+    sync_appliances_from_telemetry(uid)
     appliances = Appliance.query.filter_by(uid=uid).all()
     active_count = sum(1 for appliance in appliances if appliance.state == "ON")
     total_watts = sum(appliance.current_watts for appliance in appliances)
@@ -293,6 +416,11 @@ def telemetry_current():
             "data": snapshot.row,
         }
     )
+
+
+@app.route("/api/appliance/telemetry/accrual", methods=["GET"])
+def telemetry_accrual():
+    return jsonify(telemetry_store.accrual_for_current_sgt())
 
 
 @app.route("/api/appliance/telemetry/advance", methods=["POST"])

@@ -95,6 +95,32 @@ const APPLIANCES: Appliance[] = [
   },
 ];
 
+const DEVICE_MATCHERS: Record<string, RegExp[]> = {
+  lights: [/lamp/i, /light/i],
+  thermostat: [/smart\s*panel/i, /panel/i],
+  ac: [/air\s*con/i, /ac/i, /air\s*conditioning/i],
+  tv: [/\btv\b/i, /display/i],
+  fridge: [/fridge/i, /refrigerator/i],
+};
+
+const SPEND_TREND_FACTORS = [0.76, 0.82, 0.88, 0.93, 0.96, 0.99, 1.0];
+const COST_PER_KWH_SGD = 0.2671;
+
+function buildSpendTrend(cost: number, currentWatts: number, isOnline: boolean) {
+  const activityBoost = Math.min((Math.max(0, currentWatts) / 1500) * 0.12, 0.12);
+  const offlinePenalty = isOnline ? 0 : -0.08;
+
+  const trend = SPEND_TREND_FACTORS.map((base, index) => {
+    const dayTilt = ((index - 3) / 3) * activityBoost;
+    const factor = Math.max(0.55, base + dayTilt + offlinePenalty);
+    return Number((cost * factor).toFixed(3));
+  });
+
+  // Keep the latest point exactly in sync with current device spend.
+  trend[trend.length - 1] = Number(cost.toFixed(3));
+  return trend;
+}
+
 function Sparkline({ data, colorClass }: { data: number[]; colorClass: string }) {
   const max = Math.max(...data);
   const min = Math.min(...data);
@@ -133,18 +159,17 @@ export default function SpatialEnergyPanel({ appliances: liveAppliances }: Spati
     if (!liveAppliances || liveAppliances.length === 0) return APPLIANCES;
 
     return APPLIANCES.map((layoutApp) => {
-      // Find matching live appliance by name or fallback
-      const liveApp = liveAppliances.find(
-        (a) =>
-          a.name.toLowerCase().includes(layoutApp.id.toLowerCase()) ||
-          (layoutApp.id === "lights" && a.name.toLowerCase().includes("lamp")) ||
-          (layoutApp.id === "ac" && a.name.toLowerCase().includes("ac")) ||
-          (layoutApp.id === "fridge" && a.name.toLowerCase().includes("fridge")) ||
-          (layoutApp.id === "tv" && a.name.toLowerCase().includes("entertainment")) ||
-          (layoutApp.id === "thermostat" && a.name.toLowerCase().includes("server"))
+      const matchers = DEVICE_MATCHERS[layoutApp.id] ?? [];
+      const liveApp = liveAppliances.find((a) =>
+        matchers.some((matcher) => matcher.test(a.name)),
       );
 
       if (!liveApp) return layoutApp;
+
+      const sliceKwh = (Math.max(0, Number(liveApp.currentWatts) || 0) * (5 / 60)) / 1000;
+      const usageKwh = Math.max(Number(liveApp.kwhUsed) || 0, sliceKwh);
+      const cost = usageKwh * COST_PER_KWH_SGD;
+      const trend = buildSpendTrend(cost, Number(liveApp.currentWatts) || 0, liveApp.state === "ON");
 
       return {
         ...layoutApp,
@@ -154,13 +179,19 @@ export default function SpatialEnergyPanel({ appliances: liveAppliances }: Spati
         status: liveApp.state === "ON" ? "online" : "offline",
         stats: {
           ...layoutApp.stats,
-          usageKwh: liveApp.kwhUsed,
-          cost: liveApp.kwhUsed * 0.25, // Mock calculation for display
-          hoursActive: layoutApp.stats.hoursActive, // Keep original hours for now
+          usageKwh,
+          cost,
+          hoursActive: liveApp.state === "ON" ? Math.max(1, Math.round(usageKwh * 24)) : 0,
+          trend,
         },
       };
     });
   }, [liveAppliances]);
+
+  const applianceById = useMemo(
+    () => Object.fromEntries(mappedAppliances.map((appliance) => [appliance.id, appliance])),
+    [mappedAppliances],
+  );
 
   const [activeApplianceId, setActiveApplianceId] = useState<string>(mappedAppliances[0].id);
   const [hoveredApplianceId, setHoveredApplianceId] = useState<string | null>(null);
@@ -303,7 +334,7 @@ export default function SpatialEnergyPanel({ appliances: liveAppliances }: Spati
             <g filter={activeApplianceId === "tv" ? "url(#layoutActiveGlow)" : undefined} className="transition-all duration-300">
               <polygon points="490,280 600,335 600,245 490,190" fill="url(#layoutTvScreen)" stroke="#020617" strokeWidth="3" />
               <polygon points="485,280 490,280 490,190 485,190" fill="#1e293b" />
-              {APPLIANCES.find((item) => item.id === "tv")?.status === "online" && (
+              {applianceById.tv?.status === "online" && (
                 <g>
                   <polygon points="493,278 597,330 597,248 493,196" fill="url(#layoutTvContent)" />
                   <polygon points="510,240 540,255 540,225 510,210" fill="#38bdf8" opacity="0.5" />
@@ -314,14 +345,14 @@ export default function SpatialEnergyPanel({ appliances: liveAppliances }: Spati
             </g>
 
             <g filter={activeApplianceId === "lights" ? "url(#layoutActiveGlow)" : undefined} className="transition-all duration-300">
-              {APPLIANCES.find((item) => item.id === "lights")?.status === "online" && (
+              {applianceById.lights?.status === "online" && (
                 <polygon points="380,130 420,130 500,400 300,400" fill="url(#layoutLightBeam)" pointerEvents="none" />
               )}
               <line x1="400" y1="0" x2="400" y2="100" stroke="#475569" strokeWidth="2" />
               <ellipse cx="400" cy="100" rx="30" ry="15" fill="#1e293b" stroke="#0f172a" strokeWidth="1" />
               <ellipse cx="400" cy="98" rx="30" ry="15" fill="#334155" />
               <ellipse cx="400" cy="105" rx="20" ry="10" fill="#f8fafc" />
-              {APPLIANCES.find((item) => item.id === "lights")?.status === "online" && (
+              {applianceById.lights?.status === "online" && (
                 <ellipse cx="400" cy="110" rx="15" ry="8" fill="#fef08a" style={{ filter: "blur(3px)" }} />
               )}
             </g>
@@ -335,7 +366,7 @@ export default function SpatialEnergyPanel({ appliances: liveAppliances }: Spati
             </g>
 
             <g id="Interactive-Hitboxes" fill="transparent" className="cursor-pointer">
-              {APPLIANCES.map((appliance) => (
+              {mappedAppliances.map((appliance) => (
                 <polygon
                   key={`hitbox-${appliance.id}`}
                   points={appliance.hoverBox}
@@ -346,7 +377,7 @@ export default function SpatialEnergyPanel({ appliances: liveAppliances }: Spati
               ))}
             </g>
 
-            {APPLIANCES.map((appliance) => {
+            {mappedAppliances.map((appliance) => {
               const isHovered = hoveredApplianceId === appliance.id;
               const Icon = appliance.icon;
               return (
@@ -427,7 +458,7 @@ export default function SpatialEnergyPanel({ appliances: liveAppliances }: Spati
         <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-gray-200 bg-white p-3.5">
           <div>
             <p className="text-xs uppercase tracking-wider text-gray-500">Total Energy</p>
-            <p className="text-base font-semibold text-gray-900">{totals.energyKwh.toFixed(1)} kWh</p>
+            <p className="text-base font-semibold text-gray-900">{activeAppliance.stats.usageKwh.toFixed(1)} kWh</p>
           </div>
           <div>
             <p className="text-xs uppercase tracking-wider text-gray-500">Total Cost</p>

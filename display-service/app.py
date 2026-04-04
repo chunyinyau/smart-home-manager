@@ -21,11 +21,83 @@ PROFILE_SERVICE_URL   = os.getenv(
 
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "8"))
 
+SERVICE_FALLBACK_URLS = {
+    "budget": [
+        BUDGET_SERVICE_URL,
+        "http://host.docker.internal:5004",
+        "http://127.0.0.1:5004",
+        "http://localhost:5004",
+    ],
+    "history": [
+        HISTORY_SERVICE_URL,
+        "http://host.docker.internal:5005",
+        "http://127.0.0.1:5005",
+        "http://localhost:5005",
+    ],
+    "bill": [
+        BILL_SERVICE_URL,
+        "http://host.docker.internal:5003",
+        "http://127.0.0.1:5003",
+        "http://localhost:5003",
+    ],
+    "appliance": [
+        APPLIANCE_SERVICE_URL,
+        "http://host.docker.internal:5002",
+        "http://127.0.0.1:5002",
+        "http://localhost:5002",
+    ],
+}
+
 # ==========================================
 # Flask App
 # ==========================================
 app = Flask(__name__)
 CORS(app)
+
+
+def normalize_base_url(base_url: str) -> str:
+    return base_url.strip().rstrip("/")
+
+
+def is_untrusted_host_400(response: requests.Response) -> bool:
+    if response.status_code != 400:
+        return False
+    body = response.text or ""
+    return "is not trusted" in body and "Host" in body
+
+
+def request_with_fallback(
+    service: str,
+    path: str,
+    *,
+    params: dict | None = None,
+) -> requests.Response:
+    candidates = [normalize_base_url(url) for url in SERVICE_FALLBACK_URLS[service] if url]
+    seen = set()
+    unique_candidates = []
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        unique_candidates.append(candidate)
+
+    last_error = None
+    for base_url in unique_candidates:
+        try:
+            response = requests.get(
+                f"{base_url}{path}",
+                params=params,
+                timeout=REQUEST_TIMEOUT,
+            )
+            if is_untrusted_host_400(response):
+                continue
+            return response
+        except requests.RequestException as error:
+            last_error = error
+
+    if last_error:
+        raise last_error
+    raise RuntimeError(f"Unable to reach {service}-service across all configured base URLs")
 
 # ==========================================
 # Per-service Fetchers
@@ -35,10 +107,7 @@ def fetch_budget(user_id: str) -> dict:
     try:
         # budget-service uses integer user_id in the path
         numeric_id = int(user_id) if user_id.isdigit() else 1
-        resp = requests.get(
-            f"{BUDGET_SERVICE_URL}/api/budget/{numeric_id}",
-            timeout=REQUEST_TIMEOUT,
-        )
+        resp = request_with_fallback("budget", f"/api/budget/{numeric_id}")
         if resp.status_code == 200:
             payload = resp.json()
             return {"data": payload.get("data"), "error": None}
@@ -50,11 +119,7 @@ def fetch_budget(user_id: str) -> dict:
 def fetch_history(user_id: str) -> dict:
     """GET /api/history?uid=<user_id> from history-service."""
     try:
-        resp = requests.get(
-            f"{HISTORY_SERVICE_URL}/api/history",
-            params={"uid": user_id},
-            timeout=REQUEST_TIMEOUT,
-        )
+        resp = request_with_fallback("history", "/api/history", params={"uid": user_id})
         if resp.status_code == 200:
             return {"data": resp.json(), "error": None}
         return {"data": None, "error": f"history-service returned {resp.status_code}"}
@@ -65,10 +130,7 @@ def fetch_history(user_id: str) -> dict:
 def fetch_bills(user_id: str) -> dict:
     """GET /api/bills from bill-service, filtered by user_id."""
     try:
-        resp = requests.get(
-            f"{BILL_SERVICE_URL}/api/bills",
-            timeout=REQUEST_TIMEOUT,
-        )
+        resp = request_with_fallback("bill", "/api/bills")
         if resp.status_code == 200:
             payload = resp.json()
             all_bills = payload.get("data", [])
@@ -87,11 +149,7 @@ def fetch_bills(user_id: str) -> dict:
 def fetch_appliances(user_id: str) -> dict:
     """GET /api/appliance?uid=<user_id> from appliance-service."""
     try:
-        resp = requests.get(
-            f"{APPLIANCE_SERVICE_URL}/api/appliance",
-            params={"uid": user_id},
-            timeout=REQUEST_TIMEOUT,
-        )
+        resp = request_with_fallback("appliance", "/api/appliance", params={"uid": user_id})
         if resp.status_code == 200:
             return {"data": resp.json(), "error": None}
         return {"data": None, "error": f"appliance-service returned {resp.status_code}"}

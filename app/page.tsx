@@ -29,38 +29,150 @@ type CalculateBillRunPayload = {
   };
 };
 
+type CalculateBillStatePayload = {
+  success?: boolean;
+  error?: string;
+  data?: Record<
+    string,
+    {
+      month?: string;
+      running_total?: number;
+      updated_at?: string;
+      closed_month?: string | null;
+    }
+  >;
+};
+
 export default function App() {
   const [currentRate, setCurrentRate] = useState<number | null>(null);
   const [data, setData] = useState<DisplayPayload | null>(null);
+  const [accruedSpendFallback, setAccruedSpendFallback] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [runningBillCycle, setRunningBillCycle] = useState(false);
   const [billRunResult, setBillRunResult] = useState<CalculateBillRunPayload | null>(null);
   const [billRunError, setBillRunError] = useState<string | null>(null);
   const [dataMenuOpen, setDataMenuOpen] = useState(false);
+  const [cronState, setCronState] = useState<CalculateBillStatePayload["data"] | null>(null);
+  const [cronStateLoading, setCronStateLoading] = useState(true);
+  const [cronStateError, setCronStateError] = useState<string | null>(null);
 
   useEffect(() => {
-    // 1. Fetch live electricity rate
-    fetch('/api/rate')
-      .then(res => res.json())
-      .then(data => {
-        if (data.success && data.data) {
-          const rateData = Array.isArray(data.data) ? data.data[0] : data.data;
-          setCurrentRate(rateData?.cents_per_kwh || null);
-        }
-      })
-      .catch(console.error);
+    let alive = true;
+    let timeoutId: number | null = null;
 
-    // 2. Fetch aggregated display data
-    fetch(`/api/display?uid=${DEMO_UID}&profile_id=1`)
-      .then(res => res.json())
-      .then(payload => {
-        setData(payload);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error("Failed to fetch display data", err);
-        setLoading(false);
-      });
+    const fetchDashboardData = async () => {
+      let success = false;
+      try {
+        const [rateResponse, displayResponse] = await Promise.all([
+          fetch('/api/rate', { cache: 'no-store' }),
+          fetch(`/api/display?uid=${DEMO_UID}&profile_id=1`, { cache: 'no-store' }),
+        ]);
+
+        const ratePayload = await rateResponse.json();
+        if (ratePayload.success && ratePayload.data) {
+          const rateData = Array.isArray(ratePayload.data) ? ratePayload.data[0] : ratePayload.data;
+          if (alive) {
+            setCurrentRate(rateData?.cents_per_kwh || null);
+          }
+        }
+
+        const displayPayload = await displayResponse.json();
+        if (alive) {
+          setData(displayPayload);
+        }
+
+        // If persisted budget is still zero after restart, show immediate CSV-derived accrual.
+        const budgetCumBill = Number(displayPayload?.budget?.cum_bill ?? 0);
+        if (budgetCumBill <= 0 && ratePayload?.data) {
+          const accrualResponse = await fetch('/api/appliance/telemetry/accrual', {
+            cache: 'no-store',
+          });
+          if (accrualResponse.ok) {
+            const accrualPayload = await accrualResponse.json();
+            const accruedKwh = Number(accrualPayload?.accruedSliceKwh ?? 0);
+            const centsPerKwh = Number(
+              (Array.isArray(ratePayload.data) ? ratePayload.data[0] : ratePayload.data)?.cents_per_kwh ?? 0,
+            );
+            if (Number.isFinite(accruedKwh) && Number.isFinite(centsPerKwh)) {
+              const estimatedSpend = accruedKwh * (centsPerKwh / 100);
+              if (alive) {
+                setAccruedSpendFallback(Number(estimatedSpend.toFixed(4)));
+              }
+            }
+          }
+        } else if (alive) {
+          setAccruedSpendFallback(null);
+        }
+        success = rateResponse.ok && displayResponse.ok;
+      } catch (err) {
+        console.error("Failed to fetch dashboard data", err);
+      } finally {
+        if (alive) {
+          setLoading(false);
+          // Healthy path polls every 5 minutes. During restart/error, retry quickly.
+          const nextDelayMs = success ? 300000 : 5000;
+          timeoutId = window.setTimeout(fetchDashboardData, nextDelayMs);
+        }
+      }
+    };
+
+    fetchDashboardData();
+
+    return () => {
+      alive = false;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    let timeoutId: number | null = null;
+
+    const fetchCronState = async () => {
+      let success = false;
+      try {
+        const response = await fetch('/api/calculatebill/state', {
+          cache: 'no-store',
+        });
+        const payload = (await response.json()) as CalculateBillStatePayload;
+
+        if (!response.ok || payload.success === false) {
+          throw new Error(payload.error || `HTTP ${response.status}`);
+        }
+
+        if (!alive) {
+          return;
+        }
+
+        const stateData = payload.data ?? {};
+        setCronState(stateData);
+        setCronStateError(null);
+        success = Object.keys(stateData).length > 0;
+      } catch (error) {
+        if (!alive) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        setCronStateError(message);
+      } finally {
+        if (alive) {
+          setCronStateLoading(false);
+          const nextDelayMs = success ? 300000 : 5000;
+          timeoutId = window.setTimeout(fetchCronState, nextDelayMs);
+        }
+      }
+    };
+
+    fetchCronState();
+
+    return () => {
+      alive = false;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
   }, []);
 
   const runCalculateBill = async () => {
@@ -77,7 +189,7 @@ export default function App() {
         body: JSON.stringify({
           user_id: 1,
           uid: DEMO_UID,
-          interval_minutes: 15,
+          interval_minutes: 5,
           sync_budget: true,
         }),
       });
@@ -97,8 +209,17 @@ export default function App() {
   };
 
   const budget = data?.budget;
+  const fallbackMonth = new Date().toISOString().slice(0, 7);
+  const displayedAccruedSpend = (() => {
+    const persisted = Number(budget?.cum_bill ?? 0);
+    if (persisted > 0) {
+      return persisted;
+    }
+    return accruedSpendFallback ?? 0;
+  })();
   const profile = data?.profile;
   const history = data?.history || [];
+  const cronUserState = cronState?.["1"];
 
   return (
     <div className="flex h-screen bg-white text-gray-900 font-sans selection:bg-blue-100">
@@ -238,7 +359,7 @@ export default function App() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             <MetricCard 
-              value={`$${budget?.cum_bill?.toFixed(2) || '0.00'}`} 
+              value={`$${displayedAccruedSpend.toFixed(2)}`} 
               label="Accrued Spend" 
               timeframe="This Month" 
             />
@@ -297,6 +418,64 @@ export default function App() {
                 </div>
               )}
             </div>
+          </div>
+
+          <div className="mt-6 border border-gray-200 rounded-2xl bg-white p-6 shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between gap-3 mb-6 border-b border-gray-100 pb-4">
+              <div className="flex items-center gap-2">
+                <Server className="w-5 h-5 text-emerald-600" />
+                <h2 className="text-lg font-bold text-gray-900">Live Billing Status</h2>
+              </div>
+              <span className="text-xs font-medium uppercase tracking-wider text-gray-400">
+                Auto refresh every 5 Minutes
+              </span>
+            </div>
+
+            {cronStateLoading ? (
+              <div className="text-sm text-gray-500">Loading cron state...</div>
+            ) : cronStateError ? (
+              <div className="text-sm text-rose-600">Unable to load cron state: {cronStateError}</div>
+            ) : !cronUserState ? (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs uppercase tracking-wider text-gray-500">Current Month</div>
+                  <div className="text-xl font-semibold text-gray-900 mt-1">{fallbackMonth}</div>
+                </div>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs uppercase tracking-wider text-gray-500">Running Total</div>
+                  <div className="text-xl font-semibold text-emerald-700 mt-1">
+                    ${displayedAccruedSpend.toFixed(4)}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs uppercase tracking-wider text-gray-500">Last Updated</div>
+                  <div className="text-sm font-semibold text-gray-900 mt-2">
+                    {data?.fetched_at ? new Date(data.fetched_at).toLocaleString() : 'Warming up'}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs uppercase tracking-wider text-gray-500">Current Month</div>
+                  <div className="text-xl font-semibold text-gray-900 mt-1">{cronUserState.month ?? 'Unknown'}</div>
+                </div>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs uppercase tracking-wider text-gray-500">Running Total</div>
+                  <div className="text-xl font-semibold text-emerald-700 mt-1">
+                    ${Number(cronUserState.running_total ?? 0).toFixed(4)}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="text-xs uppercase tracking-wider text-gray-500">Last Updated</div>
+                  <div className="text-sm font-semibold text-gray-900 mt-2">
+                    {cronUserState.updated_at
+                      ? new Date(cronUserState.updated_at).toLocaleString()
+                      : 'Unknown'}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </main>

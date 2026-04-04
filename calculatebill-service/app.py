@@ -7,6 +7,8 @@ from urllib.parse import urljoin
 import requests
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.interval import IntervalTrigger
 
 
 def get_cors_origins() -> list[str]:
@@ -71,12 +73,19 @@ DEFAULT_APPLIANCE_UID = os.getenv("DEFAULT_APPLIANCE_UID", "user_demo_001")
 DEFAULT_INTERVAL_MINUTES = to_positive_float(os.getenv("BILL_INTERVAL_MINUTES"), 15.0)
 SYNC_BUDGET_EACH_RUN = parse_bool(os.getenv("SYNC_BUDGET_EACH_RUN"), True)
 AUTO_CLOSE_AT_MONTH_END = parse_bool(os.getenv("AUTO_CLOSE_AT_MONTH_END"), False)
+ENABLE_CALCULATEBILL_CRON = parse_bool(os.getenv("ENABLE_CALCULATEBILL_CRON"), False)
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": get_cors_origins()}})
 
 STATE_LOCK = Lock()
 CYCLE_STATE: dict[int, dict[str, Any]] = {}
+
+# ==========================================
+# Scheduler for automatic calculatebill runs
+# ==========================================
+scheduler = BackgroundScheduler()
+scheduler_started = False
 
 SERVICE_FALLBACK_URLS = {
     "appliance": [
@@ -186,6 +195,18 @@ def fetch_appliances(uid: str) -> list[dict[str, Any]]:
                 f"appliance-service returned HTTP {response.status_code}",
             )
         )
+    return payload
+
+
+def fetch_telemetry_accrual() -> Optional[dict[str, Any]]:
+    response = request_with_service_fallback(
+        "appliance",
+        "GET",
+        "/api/appliance/telemetry/accrual",
+    )
+    payload = parse_response_json(response)
+    if response.status_code != 200 or not isinstance(payload, dict):
+        return None
     return payload
 
 
@@ -340,11 +361,79 @@ def is_last_day_of_month(now_utc: datetime) -> bool:
     return (now_utc.date() + timedelta(days=1)).month != now_utc.month
 
 
-def update_running_total(user_id: int, month_key: str, period_cost_sgd: float) -> float:
+def resolve_budget_cum_bill(user_id: int) -> float:
+    try:
+        budget = get_or_create_budget(user_id)
+        return round(float(budget.get("cum_bill", 0.0)), 4)
+    except Exception:
+        return 0.0
+
+
+def hydrate_running_total_state(user_id: int = DEFAULT_BILL_USER_ID) -> None:
+    month_key = get_month_key(datetime.now(timezone.utc))
+    running_total = resolve_budget_cum_bill(user_id)
+    last_matched_index: Optional[int] = None
+    last_accrued_kwh: Optional[float] = None
+
+    telemetry_accrual = fetch_telemetry_accrual()
+    if telemetry_accrual and telemetry_accrual.get("matched"):
+        try:
+            accrued_kwh = float(telemetry_accrual.get("accruedSliceKwh", 0.0))
+            month_key = str(telemetry_accrual.get("monthKey") or month_key)
+            last_matched_index = int(telemetry_accrual.get("matchedIndex", 0))
+            last_accrued_kwh = accrued_kwh
+            cents_per_kwh = fetch_current_rate_cents()
+            running_total = round(accrued_kwh * (cents_per_kwh / 100.0), 4)
+        except (TypeError, ValueError, RuntimeError):
+            pass
+
+    set_running_total(
+        user_id,
+        month_key,
+        running_total,
+        last_matched_index=last_matched_index,
+        last_accrued_kwh=last_accrued_kwh,
+    )
+
+
+def set_running_total(
+    user_id: int,
+    month_key: str,
+    running_total: float,
+    *,
+    last_matched_index: Optional[int] = None,
+    last_accrued_kwh: Optional[float] = None,
+) -> None:
+    with STATE_LOCK:
+        current = CYCLE_STATE.get(user_id) or {}
+        CYCLE_STATE[user_id] = {
+            "month": month_key,
+            "running_total": round(max(0.0, float(running_total)), 4),
+            "closed_month": current.get("closed_month"),
+            "last_matched_index": (
+                int(last_matched_index)
+                if last_matched_index is not None
+                else current.get("last_matched_index")
+            ),
+            "last_accrued_kwh": (
+                round(float(last_accrued_kwh), 6)
+                if last_accrued_kwh is not None
+                else current.get("last_accrued_kwh")
+            ),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+def update_running_total(
+    user_id: int,
+    month_key: str,
+    period_cost_sgd: float,
+    baseline_total: float = 0.0,
+) -> float:
     with STATE_LOCK:
         current = CYCLE_STATE.get(user_id)
         if not current or current.get("month") != month_key:
-            running_total = 0.0
+            running_total = max(0.0, float(baseline_total))
             closed_month = None
         else:
             running_total = float(current.get("running_total", 0.0))
@@ -404,6 +493,15 @@ def home():
 @app.route("/api/calculatebill/state", methods=["GET"])
 def cycle_state():
     with STATE_LOCK:
+        has_state = bool(CYCLE_STATE)
+
+    if not has_state:
+        try:
+            hydrate_running_total_state(DEFAULT_BILL_USER_ID)
+        except Exception:
+            pass
+
+    with STATE_LOCK:
         return jsonify(
             {
                 "success": True,
@@ -413,6 +511,116 @@ def cycle_state():
                 },
             }
         ), 200
+
+
+def execute_billing_cycle(
+    user_id: int = DEFAULT_BILL_USER_ID,
+    uid: str = DEFAULT_APPLIANCE_UID,
+    interval_minutes: float = DEFAULT_INTERVAL_MINUTES,
+    sync_budget: bool = SYNC_BUDGET_EACH_RUN,
+    force_month_close: bool = False,
+) -> dict[str, Any]:
+    """
+    Core billing cycle logic, used by both API endpoint and scheduler.
+    Returns the result dict (not JSON response).
+    """
+    now_utc = datetime.now(timezone.utc)
+    month_key = get_month_key(now_utc)
+    billing_period_start_iso = now_utc.date().replace(day=1).isoformat()
+
+    appliances = fetch_appliances(uid)
+    default_period_kwh, total_watts, active_count = calculate_period_kwh(
+        appliances,
+        interval_minutes,
+    )
+
+    cents_per_kwh = fetch_current_rate_cents()
+    rate_sgd_per_kwh = cents_per_kwh / 100.0
+
+    prior_cum_bill = resolve_budget_cum_bill(user_id)
+    telemetry_accrual = fetch_telemetry_accrual()
+
+    period_kwh = default_period_kwh
+    period_cost_sgd = round(period_kwh * rate_sgd_per_kwh, 4)
+
+    if telemetry_accrual and telemetry_accrual.get("matched"):
+        try:
+            month_key = str(telemetry_accrual.get("monthKey") or month_key)
+            accrued_kwh = float(telemetry_accrual.get("accruedSliceKwh", 0.0))
+            matched_index = int(telemetry_accrual.get("matchedIndex", 0))
+
+            # Month-to-date total up to the current SGT-matched CSV row.
+            monthly_total = round(accrued_kwh * rate_sgd_per_kwh, 4)
+            period_cost_sgd = round(max(0.0, monthly_total - prior_cum_bill), 4)
+            period_kwh = (
+                round(period_cost_sgd / rate_sgd_per_kwh, 6)
+                if rate_sgd_per_kwh > 0
+                else 0.0
+            )
+            set_running_total(
+                user_id,
+                month_key,
+                monthly_total,
+                last_matched_index=matched_index,
+                last_accrued_kwh=accrued_kwh,
+            )
+        except (TypeError, ValueError):
+            monthly_total = update_running_total(
+                user_id,
+                month_key,
+                period_cost_sgd,
+                baseline_total=prior_cum_bill,
+            )
+    else:
+        monthly_total = update_running_total(
+            user_id,
+            month_key,
+            period_cost_sgd,
+            baseline_total=prior_cum_bill,
+        )
+
+    bill = create_bill_record(
+        user_id=user_id,
+        period_cost_sgd=period_cost_sgd,
+        period_kwh=period_kwh,
+        computed_at=now_utc,
+        billing_period_start_iso=billing_period_start_iso,
+    )
+
+    budget_update = None
+    if sync_budget:
+        budget_update = update_budget_cum_bill(user_id, monthly_total)
+
+    month_close_result = {
+        "closed": False,
+        "reason": "Month close not requested.",
+    }
+    should_auto_close = AUTO_CLOSE_AT_MONTH_END and is_last_day_of_month(now_utc)
+    if force_month_close or should_auto_close:
+        if not sync_budget:
+            budget_update = update_budget_cum_bill(user_id, monthly_total)
+        month_close_result = close_month_if_needed(user_id, month_key, monthly_total)
+
+    return {
+        "user_id": user_id,
+        "uid": uid,
+        "interval_minutes": interval_minutes,
+        "computed_at": now_utc.isoformat(),
+        "billing_period_start": billing_period_start_iso,
+        "inputs": {
+            "active_appliances": active_count,
+            "total_watts": total_watts,
+            "cents_per_kwh": round(cents_per_kwh, 4),
+        },
+        "result": {
+            "period_kwh": period_kwh,
+            "period_cost_sgd": period_cost_sgd,
+            "monthly_total_sgd": monthly_total,
+        },
+        "bill": bill,
+        "budget": budget_update,
+        "month_close": month_close_result,
+    }
 
 
 @app.route("/api/calculatebill/run", methods=["POST"])
@@ -428,67 +636,19 @@ def run_calculation_cycle():
     sync_budget = parse_bool(body.get("sync_budget"), SYNC_BUDGET_EACH_RUN)
     force_month_close = parse_bool(body.get("force_month_close"), False)
 
-    now_utc = datetime.now(timezone.utc)
-    month_key = get_month_key(now_utc)
-    billing_period_start_iso = now_utc.date().replace(day=1).isoformat()
-
     try:
-        appliances = fetch_appliances(uid)
-        period_kwh, total_watts, active_count = calculate_period_kwh(
-            appliances,
-            interval_minutes,
-        )
-
-        cents_per_kwh = fetch_current_rate_cents()
-        period_cost_sgd = round(period_kwh * (cents_per_kwh / 100.0), 4)
-
-        bill = create_bill_record(
+        result = execute_billing_cycle(
             user_id=user_id,
-            period_cost_sgd=period_cost_sgd,
-            period_kwh=period_kwh,
-            computed_at=now_utc,
-            billing_period_start_iso=billing_period_start_iso,
+            uid=uid,
+            interval_minutes=interval_minutes,
+            sync_budget=sync_budget,
+            force_month_close=force_month_close,
         )
-
-        monthly_total = update_running_total(user_id, month_key, period_cost_sgd)
-
-        budget_update = None
-        if sync_budget:
-            budget_update = update_budget_cum_bill(user_id, monthly_total)
-
-        month_close_result = {
-            "closed": False,
-            "reason": "Month close not requested.",
-        }
-        should_auto_close = AUTO_CLOSE_AT_MONTH_END and is_last_day_of_month(now_utc)
-        if force_month_close or should_auto_close:
-            if not sync_budget:
-                budget_update = update_budget_cum_bill(user_id, monthly_total)
-            month_close_result = close_month_if_needed(user_id, month_key, monthly_total)
 
         return jsonify(
             {
                 "success": True,
-                "data": {
-                    "user_id": user_id,
-                    "uid": uid,
-                    "interval_minutes": interval_minutes,
-                    "computed_at": now_utc.isoformat(),
-                    "billing_period_start": billing_period_start_iso,
-                    "inputs": {
-                        "active_appliances": active_count,
-                        "total_watts": total_watts,
-                        "cents_per_kwh": round(cents_per_kwh, 4),
-                    },
-                    "result": {
-                        "period_kwh": period_kwh,
-                        "period_cost_sgd": period_cost_sgd,
-                        "monthly_total_sgd": monthly_total,
-                    },
-                    "bill": bill,
-                    "budget": budget_update,
-                    "month_close": month_close_result,
-                },
+                "data": result,
             }
         ), 200
     except requests.RequestException as error:
@@ -508,6 +668,79 @@ def run_calculation_cycle():
         ), 500
 
 
+
+def scheduled_calculatebill_job():
+    """
+    Background job that runs every 5 minutes to execute the billing cycle.
+    Logs job execution but does not crash the scheduler on errors.
+    """
+    try:
+        print(
+            f"[CalculateBill Cron] Running automatic billing cycle at {datetime.now(timezone.utc).isoformat()}",
+            flush=True,
+        )
+        result = execute_billing_cycle(
+            user_id=DEFAULT_BILL_USER_ID,
+            uid=DEFAULT_APPLIANCE_UID,
+            interval_minutes=DEFAULT_INTERVAL_MINUTES,
+            sync_budget=SYNC_BUDGET_EACH_RUN,
+            force_month_close=False,
+        )
+        print(
+            f"[CalculateBill Cron] Cycle complete. Cost: ${result['result']['period_cost_sgd']}, kWh: {result['result']['period_kwh']}",
+            flush=True,
+        )
+    except Exception as e:
+        print(
+            f"[CalculateBill Cron] Error during billing cycle: {str(e)}",
+            flush=True,
+        )
+
+
+@app.before_request
+def _ensure_scheduler_started():
+    """Start scheduler on first request if enabled and not already started."""
+    global scheduler_started
+    if ENABLE_CALCULATEBILL_CRON and not scheduler_started:
+        if not scheduler.running:
+            interval_seconds = int(DEFAULT_INTERVAL_MINUTES * 60)
+            scheduler.add_job(
+                scheduled_calculatebill_job,
+                trigger=IntervalTrigger(seconds=interval_seconds),
+                id="calculatebill-cron",
+                name="CalculateBill Automatic Cycle",
+                replace_existing=True,
+            )
+            scheduler.start()
+            scheduler_started = True
+            print(
+                f"[CalculateBill Cron] Scheduler started. Running every {DEFAULT_INTERVAL_MINUTES} minutes.",
+                flush=True,
+            )
+
+
 if __name__ == "__main__":
-    print("CalculateBill composite service is ready on port 5008", flush=True)
-    app.run(host="0.0.0.0", port=5008, debug=is_debug_enabled())
+    # Pre-start the scheduler if enabled (before Flask even accepts requests)
+    if ENABLE_CALCULATEBILL_CRON:
+        if not scheduler.running:
+            interval_seconds = int(DEFAULT_INTERVAL_MINUTES * 60)
+            scheduler.add_job(
+                scheduled_calculatebill_job,
+                trigger=IntervalTrigger(seconds=interval_seconds),
+                id="calculatebill-cron",
+                name="CalculateBill Automatic Cycle",
+                replace_existing=True,
+            )
+            scheduler.start()
+            scheduler_started = True
+            print(
+                f"[CalculateBill Cron] Scheduler pre-started. Running every {DEFAULT_INTERVAL_MINUTES} minutes.",
+                flush=True,
+            )
+
+    print("CalculateBill composite service is ready on port 5008!", flush=True)
+    try:
+        app.run(host="0.0.0.0", port=5008, debug=is_debug_enabled())
+    finally:
+        if scheduler.running:
+            scheduler.shutdown()

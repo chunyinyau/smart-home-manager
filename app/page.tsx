@@ -96,7 +96,7 @@ export default function App() {
             if (Number.isFinite(accruedKwh) && Number.isFinite(centsPerKwh)) {
               const estimatedSpend = accruedKwh * (centsPerKwh / 100);
               if (alive) {
-                setAccruedSpendFallback(Number(estimatedSpend.toFixed(2)));
+                setAccruedSpendFallback(Number(estimatedSpend.toFixed(4)));
               }
             }
           }

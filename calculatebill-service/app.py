@@ -369,6 +369,33 @@ def resolve_budget_cum_bill(user_id: int) -> float:
         return 0.0
 
 
+def hydrate_running_total_state(user_id: int = DEFAULT_BILL_USER_ID) -> None:
+    month_key = get_month_key(datetime.now(timezone.utc))
+    running_total = resolve_budget_cum_bill(user_id)
+    last_matched_index: Optional[int] = None
+    last_accrued_kwh: Optional[float] = None
+
+    telemetry_accrual = fetch_telemetry_accrual()
+    if telemetry_accrual and telemetry_accrual.get("matched"):
+        try:
+            accrued_kwh = float(telemetry_accrual.get("accruedSliceKwh", 0.0))
+            month_key = str(telemetry_accrual.get("monthKey") or month_key)
+            last_matched_index = int(telemetry_accrual.get("matchedIndex", 0))
+            last_accrued_kwh = accrued_kwh
+            cents_per_kwh = fetch_current_rate_cents()
+            running_total = round(accrued_kwh * (cents_per_kwh / 100.0), 4)
+        except (TypeError, ValueError, RuntimeError):
+            pass
+
+    set_running_total(
+        user_id,
+        month_key,
+        running_total,
+        last_matched_index=last_matched_index,
+        last_accrued_kwh=last_accrued_kwh,
+    )
+
+
 def set_running_total(
     user_id: int,
     month_key: str,
@@ -465,6 +492,15 @@ def home():
 
 @app.route("/api/calculatebill/state", methods=["GET"])
 def cycle_state():
+    with STATE_LOCK:
+        has_state = bool(CYCLE_STATE)
+
+    if not has_state:
+        try:
+            hydrate_running_total_state(DEFAULT_BILL_USER_ID)
+        except Exception:
+            pass
+
     with STATE_LOCK:
         return jsonify(
             {

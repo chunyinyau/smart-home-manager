@@ -90,6 +90,8 @@ export interface ProfileData {
   user_id: number;
   hdb_type: number;
   baseline_monthly_kwh: number;
+  name?: string;
+  email?: string;
 }
 
 export interface DisplayPayload {

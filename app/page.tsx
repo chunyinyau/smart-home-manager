@@ -56,68 +56,74 @@ export default function App() {
   const [cronState, setCronState] = useState<CalculateBillStatePayload["data"] | null>(null);
   const [cronStateLoading, setCronStateLoading] = useState(true);
   const [cronStateError, setCronStateError] = useState<string | null>(null);
+  const [budgetMenuOpen, setBudgetMenuOpen] = useState(false);
+  const [automationMenuOpen, setAutomationMenuOpen] = useState(false);
+  const [budgetCapInput, setBudgetCapInput] = useState<string>('');
+  const [updatingBudget, setUpdatingBudget] = useState(false);
+  const [budgetActionFeedback, setBudgetActionFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [automatingState, setAutomatingState] = useState(false);
+  const [automationFeedback, setAutomationFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [applianceMenuOpen, setApplianceMenuOpen] = useState(false);
+  const [togglingApplianceId, setTogglingApplianceId] = useState<string | null>(null);
+
+  const fetchDashboardData = async (isManual = false) => {
+    try {
+      const [rateResponse, displayResponse] = await Promise.all([
+        fetch('/api/rate', { cache: 'no-store' }),
+        fetch(`/api/display?uid=${DEMO_UID}&profile_id=1`, { cache: 'no-store' }),
+      ]);
+
+      const ratePayload = await rateResponse.json();
+      if (ratePayload.success && ratePayload.data) {
+        const rateData = Array.isArray(ratePayload.data) ? ratePayload.data[0] : ratePayload.data;
+        setCurrentRate(rateData?.cents_per_kwh || null);
+      }
+
+      const displayPayload = await displayResponse.json();
+      setData(displayPayload);
+
+      // If persisted budget is still zero after restart, show immediate CSV-derived accrual.
+      const budgetCumBill = Number(displayPayload?.budget?.cum_bill ?? 0);
+      if (budgetCumBill <= 0 && ratePayload?.data) {
+        const accrualResponse = await fetch('/api/appliance/telemetry/accrual', {
+          cache: 'no-store',
+        });
+        if (accrualResponse.ok) {
+          const accrualPayload = await accrualResponse.json();
+          const accruedKwh = Number(accrualPayload?.accruedSliceKwh ?? 0);
+          const centsPerKwh = Number(
+            (Array.isArray(ratePayload.data) ? ratePayload.data[0] : ratePayload.data)?.cents_per_kwh ?? 0,
+          );
+          if (Number.isFinite(accruedKwh) && Number.isFinite(centsPerKwh)) {
+            const estimatedSpend = accruedKwh * (centsPerKwh / 100);
+            setAccruedSpendFallback(Number(estimatedSpend.toFixed(4)));
+          }
+        }
+      } else {
+        setAccruedSpendFallback(null);
+      }
+      return rateResponse.ok && displayResponse.ok;
+    } catch (err) {
+      console.error("Failed to fetch dashboard data", err);
+      return false;
+    } finally {
+      if (!isManual) setLoading(false);
+    }
+  };
 
   useEffect(() => {
     let alive = true;
     let timeoutId: number | null = null;
 
-    const fetchDashboardData = async () => {
-      let success = false;
-      try {
-        const [rateResponse, displayResponse] = await Promise.all([
-          fetch('/api/rate', { cache: 'no-store' }),
-          fetch(`/api/display?uid=${DEMO_UID}&profile_id=1`, { cache: 'no-store' }),
-        ]);
-
-        const ratePayload = await rateResponse.json();
-        if (ratePayload.success && ratePayload.data) {
-          const rateData = Array.isArray(ratePayload.data) ? ratePayload.data[0] : ratePayload.data;
-          if (alive) {
-            setCurrentRate(rateData?.cents_per_kwh || null);
-          }
-        }
-
-        const displayPayload = await displayResponse.json();
-        if (alive) {
-          setData(displayPayload);
-        }
-
-        // If persisted budget is still zero after restart, show immediate CSV-derived accrual.
-        const budgetCumBill = Number(displayPayload?.budget?.cum_bill ?? 0);
-        if (budgetCumBill <= 0 && ratePayload?.data) {
-          const accrualResponse = await fetch('/api/appliance/telemetry/accrual', {
-            cache: 'no-store',
-          });
-          if (accrualResponse.ok) {
-            const accrualPayload = await accrualResponse.json();
-            const accruedKwh = Number(accrualPayload?.accruedSliceKwh ?? 0);
-            const centsPerKwh = Number(
-              (Array.isArray(ratePayload.data) ? ratePayload.data[0] : ratePayload.data)?.cents_per_kwh ?? 0,
-            );
-            if (Number.isFinite(accruedKwh) && Number.isFinite(centsPerKwh)) {
-              const estimatedSpend = accruedKwh * (centsPerKwh / 100);
-              if (alive) {
-                setAccruedSpendFallback(Number(estimatedSpend.toFixed(4)));
-              }
-            }
-          }
-        } else if (alive) {
-          setAccruedSpendFallback(null);
-        }
-        success = rateResponse.ok && displayResponse.ok;
-      } catch (err) {
-        console.error("Failed to fetch dashboard data", err);
-      } finally {
-        if (alive) {
-          setLoading(false);
-          // Healthy path polls every 5 minutes. During restart/error, retry quickly.
-          const nextDelayMs = success ? 300000 : 5000;
-          timeoutId = window.setTimeout(fetchDashboardData, nextDelayMs);
-        }
+    const runPoll = async () => {
+      const success = await fetchDashboardData();
+      if (alive) {
+        const nextDelayMs = success ? 300000 : 5000;
+        timeoutId = window.setTimeout(runPoll, nextDelayMs);
       }
     };
 
-    fetchDashboardData();
+    runPoll();
 
     return () => {
       alive = false;
@@ -209,6 +215,84 @@ export default function App() {
     }
   };
 
+  const handleUpdateBudget = async () => {
+    if (!budgetCapInput || isNaN(Number(budgetCapInput))) return;
+    setUpdatingBudget(true);
+    setBudgetActionFeedback(null);
+    try {
+      const response = await fetch('/api/orchestrator', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          intent: 'set_budget',
+          params: { uid: DEMO_UID, monthlyCap: Number(budgetCapInput) }
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok || (result.accepted === false)) {
+        setBudgetActionFeedback({ type: 'error', message: result.message || result.error || 'Failed to update budget' });
+      } else {
+        setBudgetActionFeedback({ type: 'success', message: 'Budget updated successfully' });
+        // Force refresh or update local state
+        setTimeout(() => setBudgetMenuOpen(false), 2000);
+      }
+    } catch (err) {
+      setBudgetActionFeedback({ type: 'error', message: 'Network error occurred' });
+    } finally {
+      setUpdatingBudget(false);
+    }
+  };
+
+  const handleAutoShutdown = async () => {
+    setAutomatingState(true);
+    setAutomationFeedback(null);
+    try {
+      const response = await fetch('/api/change-appliance-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: DEMO_UID, targetState: 'OFF' }),
+      });
+      const result = await response.json();
+      if (!response.ok || result.error) {
+        setAutomationFeedback({ type: 'error', message: result.error || 'Automation failed' });
+      } else {
+        setAutomationFeedback({ type: 'success', message: result.message || 'Shut down heaviest load' });
+        setTimeout(() => setAutomationMenuOpen(false), 2000);
+      }
+    } catch (err) {
+      setAutomationFeedback({ type: 'error', message: 'Network error occurred' });
+    } finally {
+      setAutomatingState(false);
+    }
+  };
+
+  const handleToggleAppliance = async (aid: string, currentState: string) => {
+    const targetState = currentState.toUpperCase() === 'ON' ? 'OFF' : 'ON';
+    setTogglingApplianceId(aid);
+    try {
+      const response = await fetch('/api/change-appliance-state', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          uid: DEMO_UID,
+          aid: aid,
+          targetState: targetState,
+        }),
+      });
+
+      if (response.ok) {
+        // Instant visual feedback: silent re-fetch
+        await fetchDashboardData(true);
+      }
+    } catch (err) {
+      console.error("Toggle appliance failure:", err);
+    } finally {
+      setTogglingApplianceId(null);
+    }
+  };
+
   const budget = data?.budget;
   const forecast = data?.forecast;
   const fallbackMonth = new Date().toISOString().slice(0, 7);
@@ -262,9 +346,8 @@ export default function App() {
           </div>
           <nav className="px-3 space-y-0.5">
             <NavItem icon={<LayoutDashboard size={18} />} label="App Dashboard" active />
-            <NavItem icon={<Server size={18} />} label="Endpoints" />
             
-            {/* Data Toggle */}
+            {/* 1. Data Sync Panel */}
             <button
               onClick={() => setDataMenuOpen(!dataMenuOpen)}
               className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-[14px] font-medium transition-colors ${
@@ -273,72 +356,175 @@ export default function App() {
             >
               <div className="flex items-center gap-3">
                 <Database className={dataMenuOpen ? 'text-blue-600' : 'text-gray-400'} size={18} />
-                Data
+                Billing Sync
               </div>
               <div className={`transform transition-transform duration-200 ${dataMenuOpen ? 'rotate-180' : ''}`}>
                 <ChevronDown className="w-4 h-4 text-gray-400" />
               </div>
             </button>
-
-            {/* Data Submenu */}
             {dataMenuOpen && (
-              <div className="pl-6 space-y-0.5 bg-gray-50 rounded-md py-2">
+              <div className="pl-6 space-y-0.5 bg-gray-50 rounded-md py-2 px-2 m-1 border border-gray-100">
+                <p className="text-[11px] text-gray-400 uppercase font-bold mb-2 ml-1">Manual Controls</p>
                 <button
                   onClick={runCalculateBill}
                   disabled={runningBillCycle}
-                  className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-md text-[13px] font-medium text-gray-600 hover:text-gray-900 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  title="Sync current billing cycle with budget"
+                  className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-md text-[13px] font-medium text-gray-600 hover:text-gray-900 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors border border-transparent hover:border-gray-200"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-4 h-4 flex items-center justify-center text-gray-400">
-                      {runningBillCycle ? '⟳' : '⟳'}
-                    </div>
-                    <span>{runningBillCycle ? 'Syncing...' : 'Sync Bill'}</span>
+                    <div className={runningBillCycle ? 'animate-spin' : ''}>⟳</div>
+                    <span>{runningBillCycle ? 'Syncing...' : 'Force Bill Run'}</span>
                   </div>
-                  {billRunResult && !billRunError && (
-                    <div className="w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center x-sm text-white"></div>
-                  )}
-                  {billRunError && (
-                    <div className="w-4 h-4 rounded-full bg-rose-500 flex items-center justify-center text-xs text-white">✕</div>
-                  )}
+                  {billRunResult && !billRunError && <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>}
                 </button>
               </div>
             )}
 
-            <NavItem icon={<Wallet size={18} />} label="Budgets" />
-            <NavItem icon={<Activity size={18} />} label="Transactions" hasChevron />
-            <NavItem icon={<Layers size={18} />} label="Orchestrations" />
-            <NavItem icon={<Wrench size={18} />} label="Tools" hasChevron />
+            {/* 2. Budget Control Panel */}
+            <button
+              onClick={() => setBudgetMenuOpen(!budgetMenuOpen)}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-[14px] font-medium transition-colors ${
+                budgetMenuOpen ? 'bg-emerald-50 text-emerald-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Wallet className={budgetMenuOpen ? 'text-emerald-600' : 'text-gray-400'} size={18} />
+                Projected Budget
+              </div>
+              <div className={`transform transition-transform duration-200 ${budgetMenuOpen ? 'rotate-180' : ''}`}>
+                <ChevronDown className="w-4 h-4 text-gray-400" />
+              </div>
+            </button>
+            {budgetMenuOpen && (
+              <div className="pl-6 space-y-2 bg-emerald-50/30 rounded-md py-3 px-3 m-1 border border-emerald-100">
+                <p className="text-[11px] text-emerald-600 uppercase font-bold">Adjust Monthly Cap</p>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <span className="absolute left-2.5 top-2 text-gray-400 text-xs">$</span>
+                    <input 
+                      type="text" 
+                      value={budgetCapInput}
+                      onChange={(e) => setBudgetCapInput(e.target.value)}
+                      placeholder="Amount" 
+                      className="w-full pl-6 pr-2 py-1.5 text-xs bg-white border border-emerald-200 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <button 
+                    disabled={updatingBudget || !budgetCapInput}
+                    onClick={handleUpdateBudget}
+                    className="bg-emerald-600 text-white text-xs px-3 py-1.5 rounded font-bold hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                  >
+                    {updatingBudget ? '...' : 'Set'}
+                  </button>
+                </div>
+                {budgetActionFeedback && (
+                  <p className={`text-[10px] font-medium leading-tight ${budgetActionFeedback.type === 'success' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    {budgetActionFeedback.message}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* 3. Smart Automation Panel */}
+            <button
+              onClick={() => setAutomationMenuOpen(!automationMenuOpen)}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-[14px] font-medium transition-colors ${
+                automationMenuOpen ? 'bg-amber-50 text-amber-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Zap className={automationMenuOpen ? 'text-amber-600' : 'text-gray-400'} size={18} />
+                Active Automation
+              </div>
+              <div className={`transform transition-transform duration-200 ${automationMenuOpen ? 'rotate-180' : ''}`}>
+                <ChevronDown className="w-4 h-4 text-gray-400" />
+              </div>
+            </button>
+            {automationMenuOpen && (
+              <div className="pl-6 space-y-3 bg-amber-50/30 rounded-md py-3 px-3 m-1 border border-amber-100">
+                <p className="text-[11px] text-amber-600 uppercase font-bold">Interventions</p>
+                <button
+                  disabled={automatingState}
+                  onClick={handleAutoShutdown}
+                  className="w-full flex items-center gap-2 px-3 py-2 bg-white border border-amber-200 rounded-md text-[12px] font-bold text-amber-700 hover:bg-amber-50 transition-all shadow-sm active:scale-[0.98]"
+                >
+                  {automatingState ? '⟳ Processing...' : 'Auto-Shutdown Load'}
+                </button>
+                {automationFeedback && (
+                  <p className={`text-[10px] font-medium leading-tight ${automationFeedback.type === 'success' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    {automationFeedback.message}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* 4. Appliance Monitor Panel */}
+            <button
+              onClick={() => setApplianceMenuOpen(!applianceMenuOpen)}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-[14px] font-medium transition-colors ${
+                applianceMenuOpen ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <LayoutDashboard className={applianceMenuOpen ? 'text-indigo-600' : 'text-gray-400'} size={18} />
+                Device Registry
+              </div>
+              <div className={`transform transition-transform duration-200 ${applianceMenuOpen ? 'rotate-180' : ''}`}>
+                <ChevronDown className="w-4 h-4 text-gray-400" />
+              </div>
+            </button>
+            {applianceMenuOpen && (
+              <div className="pl-6 space-y-1 bg-indigo-50/20 rounded-md py-2 px-2 m-1 border border-indigo-100">
+                <p className="text-[11px] text-indigo-600 uppercase font-bold mb-2 ml-1">Live Appliance Stack</p>
+                <div className="space-y-0.5">
+                  {(data?.appliances ?? [])
+                    .sort((a, b) => (b.currentWatts || 0) - (a.currentWatts || 0))
+                    .map((app) => (
+                      <div key={app.id} className="flex items-center justify-between p-2 rounded hover:bg-white transition-all group border border-transparent hover:border-indigo-100">
+                        <div className="flex flex-col">
+                          <span className="text-[11px] font-bold text-gray-700 leading-none">{app.name}</span>
+                          <span className="text-[9px] text-gray-400 font-medium uppercase tracking-[0.05em] mt-1 line-clamp-1">{app.room} • {app.currentWatts.toFixed(0)}W</span>
+                        </div>
+                        <button
+                          onClick={() => handleToggleAppliance(app.id, app.state)}
+                          disabled={togglingApplianceId === app.id}
+                          className={`relative w-8 h-4 rounded-full transition-colors flex items-center px-0.5 ${
+                            app.state?.toUpperCase() === 'ON' ? 'bg-emerald-500' : 'bg-gray-300'
+                          } ${togglingApplianceId === app.id ? 'opacity-50' : ''}`}
+                        >
+                          <div className={`w-3 h-3 bg-white rounded-full transition-transform transform shadow-sm ${
+                            app.state?.toUpperCase() === 'ON' ? 'translate-x-4' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+                    ))}
+                </div>
+                <p className="text-[9px] text-indigo-500/60 p-2 mt-2 border-t border-indigo-100 italic">
+                  * Sorted by live energy consumption.
+                </p>
+              </div>
+            )}
           </nav>
         </div>
         <div>
-          <nav className="px-3 pb-4 space-y-0.5 border-t border-gray-100 pt-4">
-            <NavItem icon={<ShieldCheck size={18} />} label="Security" />
-            <NavItem icon={<Settings size={18} />} label="App Settings" />
-          </nav>
-          <div className="p-4 border-t border-gray-200 flex justify-between items-center">
-            <button className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 border border-gray-200 px-3 py-1.5 rounded-md w-full justify-center">
-              <MessageSquare size={16} />
-              Share feedback
-            </button>
+          <div className="px-6 py-4 border-t border-gray-100 italic text-[10px] text-gray-400 leading-tight">
+            Resident Control Center v1.0 <br /> Managed via Composite Microservices
           </div>
         </div>
       </aside>
 
       {/* MAIN CONTENT AREA */}
       <main className="flex-1 flex flex-col overflow-hidden bg-white">
-        <header className="h-16 border-b border-gray-200 flex items-center justify-between px-6 bg-white">
-          <div className="flex items-center text-sm font-medium text-gray-600 cursor-pointer">
-            <div className="flex items-center gap-2 border border-gray-200 px-3 py-1.5 rounded-md hover:bg-gray-50 transition-colors">
-              <span className="w-5 h-5 bg-gray-100 border border-gray-200 rounded-full flex items-center justify-center text-xs">E</span>
-              Elroy&apos;s Team
-              <span className="bg-gray-100 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold text-gray-500">Free</span>
+        <header className="h-16 border-b border-gray-200 flex items-center justify-between px-6 bg-white overflow-x-auto no-scrollbar">
+          <div className="flex items-center text-sm font-medium text-gray-600 gap-2 min-w-max">
+            <div className="flex items-center gap-2 border border-blue-200 bg-blue-50/50 px-3 py-1.5 rounded-md hover:bg-blue-50 transition-colors">
+              <span className="w-5 h-5 bg-blue-600 text-white border border-blue-600 rounded-full flex items-center justify-center text-[10px] font-black shadow-sm">W</span>
+              <span className="font-bold text-blue-900 tracking-tight">waatch-ing</span>
+              <span className="bg-blue-600 px-1.5 py-0.5 rounded text-[9px] uppercase font-black text-white shadow-sm">Active</span>
             </div>
-            <ChevronRight className="w-4 h-4 mx-2 text-gray-400" />
-            <div className="flex items-center gap-2 border border-gray-200 px-3 py-1.5 rounded-md hover:bg-gray-50 transition-colors">
-              <Server className="w-4 h-4" />
-              Singapore-01
-              <ChevronDown className="w-4 h-4" />
+            <ChevronRight className="w-4 h-4 text-gray-300" />
+            <div className="flex items-center gap-2 border border-gray-200 px-3 py-1.5 rounded-md bg-white">
+              <Activity className="w-4 h-4 text-emerald-500" />
+              <span className="text-gray-900">{data?.appliances?.filter(a => a.state?.toUpperCase() === 'ON').length || 0} Appliances Running</span>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -353,25 +539,26 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex items-center bg-gray-100 rounded-full p-1 border border-gray-200">
-              <button className="p-1 rounded-full bg-white shadow-sm text-gray-800">
-                <Sun size={14} />
-              </button>
-              <button className="p-1 rounded-full text-gray-400 hover:text-gray-600">
-                <Moon size={14} />
-              </button>
-            </div>
-            <button className="flex items-center gap-2 text-sm font-medium text-gray-600 border border-gray-200 px-3 py-1.5 rounded-md hover:bg-gray-50">
-              <Book size={16} /> Docs
-            </button>
-            <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm border border-blue-200">
-              ET
+            <a 
+              href="#recent-activities"
+              className="flex items-center gap-2 text-sm font-medium text-gray-600 border border-gray-200 px-3 py-1.5 rounded-md hover:bg-gray-50 transition-colors"
+            >
+              <Database size={16} /> Logs
+            </a>
+            <div className="flex items-center gap-3 pl-2 border-l border-gray-200">
+              <div className="flex flex-col items-end hidden sm:flex">
+                <span className="text-xs font-bold text-gray-900 leading-none">{profile?.name || 'Guest User'}</span>
+                <span className="text-[10px] font-medium text-gray-400 leading-none mt-1">Resident</span>
+              </div>
+              <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-black text-xs border border-blue-700 shadow-sm">
+                {(profile?.name || 'G').split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
+              </div>
             </div>
           </div>
         </header>
         <div className="flex-1 overflow-y-auto p-8 max-w-[1400px] mx-auto w-full">
           <div className="flex justify-between items-center mb-6">
-            <h1 className="text-[28px] font-semibold tracking-tight text-gray-900">Singapore-01 Node</h1>
+            <h1 className="text-[28px] font-semibold tracking-tight text-gray-900">Your Home</h1>
             {loading && <span className="text-sm text-blue-600 animate-pulse font-medium">Syncing with Microservices...</span>}
           </div>
 
@@ -505,7 +692,7 @@ export default function App() {
           </div>
 
           {/* NEW: Recent Logs Section */}
-          <div className="mt-4 border border-gray-200 rounded-2xl bg-white p-6 shadow-sm overflow-hidden">
+          <div id="recent-activities" className="mt-4 border border-gray-200 rounded-2xl bg-white p-6 shadow-sm overflow-hidden scroll-mt-6">
             <div className="flex items-center gap-2 mb-6 border-b border-gray-100 pb-4">
               <Activity className="w-5 h-5 text-blue-600" />
               <h2 className="text-lg font-bold text-gray-900">Recent System Activities</h2>

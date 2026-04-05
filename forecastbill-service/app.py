@@ -524,12 +524,12 @@ def normalize_ai_assessment(payload: Any, fallback: dict[str, Any]) -> dict[str,
     return normalized
 
 
-def resolve_picoclaw_api_key() -> tuple[Optional[str], Optional[str]]:
+def resolve_picoclaw_api_key() -> str:
     api_key = os.getenv("PICOCLAW_API_KEY")
     if api_key:
-        return api_key, "PICOCLAW_API_KEY"
+        return api_key
 
-    return None, None
+    return None
 
 
 def get_ai_assessment(
@@ -541,8 +541,8 @@ def get_ai_assessment(
         return fallback
 
     try:
-        api_key, api_key_source = resolve_picoclaw_api_key()
-        if api_key and api_key_source:
+        api_key = resolve_picoclaw_api_key()
+        if api_key:
             print("ForecastBill PicoClaw request starting", flush=True)
         else:
             print("ForecastBill PicoClaw request starting; key=not-set (local mode)", flush=True)

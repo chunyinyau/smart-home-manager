@@ -199,7 +199,26 @@ services:
       - bill_service
       - budget_service
 
-  # 14. Request Change Composite Service (Port 5011 on host) - no DB
+  # 14. UpdateBudget Composite Service (Port 5012 on host) - no DB
+  updatebudget_service:
+    build: ./updatebudget-service
+    restart: always
+    ports:
+      - "5012:5012"
+    environment:
+      - FORECASTBILL_SERVICE_URL=http://forecastbill_service:5009
+      - BUDGET_SERVICE_URL=http://budget_service:5004
+      - RABBITMQ_URLS=amqp://guest:guest@rabbitmq:5672
+      - HISTORY_EVENTS_QUEUE=history.events.v1
+      - REQUEST_TIMEOUT_SECONDS=8
+      - DEFAULT_UID=user_demo_001
+      - DEFAULT_BUDGET_USER_ID=1
+    depends_on:
+      - forecastbill_service
+      - budget_service
+      - rabbitmq
+
+  # 15. Request Change Composite Service (Port 5011 on host) - no DB
   request_change_service:
     build: ./request-change-service
     restart: always
@@ -213,7 +232,7 @@ services:
     depends_on:
       - history_service
 
-  # 15. Change State Service (Port 5010 on host) - no DB
+  # 16. Change State Service (Port 5010 on host) - no DB
   change_state_service:
     build: ./change-state-service
     restart: always

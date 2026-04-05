@@ -12,6 +12,7 @@ Wattch is a smart home energy management demo built with Next.js. It shows how a
 - Runs rate, appliance, budget, bill, and history as Dockerized Python microservices.
 - Runs calculatebill as a composite Flask microservice on port 5008.
 - Runs forecastbill as a composite Flask microservice on port 5009.
+- Runs updatebudget as a composite Flask microservice on port 5012.
 - Uses RabbitMQ for asynchronous history log ingestion.
 
 ## Tech Stack
@@ -113,6 +114,7 @@ The app includes the following route handlers:
 - `GET /api/profile`
 - `GET /api/rate`
 - `GET /api/forecast`
+- `PUT /api/updatebudget/[user_id]`
 - `POST /api/orchestrator`
 
 ## CalculateBill Composite Service
@@ -157,6 +159,23 @@ Endpoints exposed by the composite service:
 - `POST /api/forecastbill` - alias for `POST /api/forecast`
 
 Forecast response includes `projectedCost`, `projectedKwh`, `riskLevel`, `daysToExceed`, `shortNarrative`, and `recommendedAppliances`.
+
+## UpdateBudget Composite Service
+
+The UpdateBudget composite service runs as a Flask container on port `5012` and orchestrates:
+
+- `forecastbill-service` to generate projected month-end spend
+- `budget-service` to apply cap updates only when request is accepted
+- direct RabbitMQ publish of `BudgetUpdateAccepted` / `BudgetUpdateRejected` events
+
+CalculateBill runs on its own cron schedule, so UpdateBudget evaluates budget requests using the latest persisted billing state instead of triggering CalculateBill on-demand.
+
+The `history-service` consumes those queue events and appends immutable logs.
+
+Endpoints exposed by the composite service:
+
+- `PUT /api/updatebudget/<user_id>` - canonical endpoint for Telegram/UI initiated budget updates
+- `POST /api/updatebudget` - convenience endpoint when user_id is provided in body
 
 ## RabbitMQ (History Events)
 

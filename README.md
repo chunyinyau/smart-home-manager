@@ -260,7 +260,7 @@ Endpoints exposed by the composite service:
 - Queue name defaults to `history.events.v1`.
 - Configure broker via `RABBITMQ_URL` (single URL) or `RABBITMQ_URLS` (comma-separated fallback URLs).
 - Optional queue override: `HISTORY_EVENTS_QUEUE`.
-- Docker compose starts RabbitMQ with management UI on `http://localhost:15672`.
+- Docker compose starts RabbitMQ with management UI on `http://localhost:15673`.
 
 ## Notes
 

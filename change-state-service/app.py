@@ -185,13 +185,13 @@ def home():
     return jsonify(
         {
             "status": "online",
-            "service": "State Change Automator Composite",
-            "endpoints": ["POST /api/state-change-automator/start"],
+            "service": "Change State Automator",
+            "endpoints": ["POST /api/change-state/start"],
         }
     ), 200
 
 
-@app.route("/api/state-change-automator/start", methods=["POST"])
+@app.route("/api/change-state/start", methods=["POST"])
 def start_automator():
     body = request.get_json(silent=True) or {}
 

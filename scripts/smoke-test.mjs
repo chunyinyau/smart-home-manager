@@ -83,6 +83,15 @@ const serviceBaseUrls = {
     "SMOKE_UPDATEBUDGET_SERVICE_URL",
     "UPDATEBUDGET_SERVICE_BASE_URL",
     "UPDATEBUDGET_SERVICE_URL",
+  requestchange: resolveBaseUrl("http://localhost:5011", [
+    "SMOKE_REQUEST_CHANGE_SERVICE_URL",
+    "REQUEST_CHANGE_SERVICE_BASE_URL",
+    "REQUEST_CHANGE_SERVICE_URL",
+  ]),
+  changestate: resolveBaseUrl("http://localhost:5010", [
+    "SMOKE_CHANGE_STATE_SERVICE_URL",
+    "CHANGE_STATE_SERVICE_BASE_URL",
+    "CHANGE_STATE_SERVICE_URL",
   ]),
 };
 
@@ -201,6 +210,24 @@ const checks = [
     path: `/api/forecast?uid=${encodeURIComponent(historyUserId)}`,
     baseUrl: serviceBaseUrls.forecastbill,
     label: "forecastbill-service",
+    expectedStatuses: [200],
+    toleratedStatuses: [],
+  },
+  {
+    name: "Request Change Service Health",
+    method: "GET",
+    path: "/",
+    baseUrl: serviceBaseUrls.requestchange,
+    label: "request-change-service",
+    expectedStatuses: [200],
+    toleratedStatuses: [],
+  },
+  {
+    name: "Change State Service Health",
+    method: "GET",
+    path: "/",
+    baseUrl: serviceBaseUrls.changestate,
+    label: "change-state-service",
     expectedStatuses: [200],
     toleratedStatuses: [],
   },
@@ -613,6 +640,8 @@ async function main() {
   console.log(`- calculatebill-service: ${serviceBaseUrls.calculatebill}`);
   console.log(`- forecastbill-service: ${serviceBaseUrls.forecastbill}`);
   console.log(`- updatebudget-service: ${serviceBaseUrls.updatebudget}`);
+  console.log(`- request-change-service: ${serviceBaseUrls.requestchange}`);
+  console.log(`- change-state-service: ${serviceBaseUrls.changestate}`);
   console.log(`Timeout: ${timeoutMs}ms`);
   console.log("");
 

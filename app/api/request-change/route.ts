@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { changeApplianceState } from "@/lib/services/change-appliance-state/change-appliance-state.service";
+import { requestChange } from "@/lib/services/request-change/request-change.service";
 
 export async function POST(request: Request) {
   try {
@@ -11,7 +11,7 @@ export async function POST(request: Request) {
         }
       | null;
 
-    const result = await changeApplianceState({
+    const result = await requestChange({
       uid: body?.uid,
       aid: body?.aid,
       targetState: body?.targetState,
@@ -19,9 +19,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json(result);
   } catch (error) {
-    console.error("CHANGE APPLIANCE STATE FAILURE:", error);
+    console.error("REQUEST CHANGE FAILURE:", error);
     return NextResponse.json(
-      { error: "Change appliance state composite service is currently unreachable" },
+      { error: "Request change composite service is currently unreachable" },
       { status: 503 },
     );
   }

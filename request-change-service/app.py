@@ -1,7 +1,8 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Optional
 from urllib.parse import urljoin
+from zoneinfo import ZoneInfo
 
 import requests
 from flask import Flask, jsonify, request
@@ -16,6 +17,7 @@ CHANGE_STATE_SERVICE_URL = os.getenv(
 HISTORY_SERVICE_URL = os.getenv("HISTORY_SERVICE_URL", "http://history_service:5005")
 REQUEST_TIMEOUT_SECONDS = float(os.getenv("REQUEST_TIMEOUT_SECONDS", "8"))
 DEFAULT_UID = os.getenv("DEFAULT_UID", "user_demo_001")
+SGT_TZ = ZoneInfo("Asia/Singapore")
 
 SERVICE_FALLBACK_URLS = {
     "automator": [
@@ -92,8 +94,8 @@ def request_with_fallback(
     raise RuntimeError(f"Unable to reach {service}-service across all configured base URLs")
 
 
-def to_iso_utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+def to_iso_sgt_now() -> str:
+    return datetime.now(SGT_TZ).isoformat()
 
 
 def pick_forecast_summary(automator_payload: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -149,12 +151,22 @@ def pick_changed_appliances(automator_payload: dict[str, Any]) -> list[dict[str,
 def build_confirmation_text(
     changed_appliances: list[dict[str, Any]],
     forecast_summary: Optional[dict[str, Any]],
+    target_state: str,
+    duration_minutes: Optional[int],
+    override_until: Optional[str],
 ) -> str:
     if not changed_appliances:
         return "No active appliance was changed."
 
     names = [str(item.get("name") or item.get("id") or "Unknown appliance") for item in changed_appliances]
-    base = f"Turned off: {', '.join(names)}."
+    action = "Turned off" if target_state == "OFF" else "Turned on"
+    base = f"{action}: {', '.join(names)}."
+
+    if duration_minutes is not None:
+        if override_until:
+            base = f"{base} Duration: {duration_minutes} minute(s), until {override_until}."
+        else:
+            base = f"{base} Duration: {duration_minutes} minute(s)."
 
     if not forecast_summary:
         return base
@@ -174,14 +186,19 @@ def build_confirmation_text(
     return f"{base} Forecast {' | '.join(extras)}."
 
 
-def publish_appliance_state_changed(uid: str, target_state: str, changed_appliances: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
+def publish_appliance_state_changed(
+    uid: str,
+    target_state: str,
+    changed_appliances: list[dict[str, Any]],
+) -> Optional[dict[str, Any]]:
     names = [str(item.get("name") or item.get("id") or "unknown") for item in changed_appliances]
-    message = f"ApplianceStateChanged: user requested {target_state} for {', '.join(names)}."
+    requested_state = "OFF" if target_state == "OFF" else "ON"
+    message = f"ApplianceStateChanged: user requested {requested_state} for {', '.join(names)}."
 
     payload = {
         "user_id": uid,
         "message": message,
-        "occurred_at": to_iso_utc_now(),
+        "occurred_at": to_iso_sgt_now(),
     }
 
     response = request_with_fallback(
@@ -218,6 +235,13 @@ def request_change():
 
     uid = str(body.get("uid") or DEFAULT_UID)
     target_state = str(body.get("target_state") or "OFF").upper()
+    duration_minutes_raw = body.get("duration_minutes")
+    duration_minutes: Optional[int] = None
+    if duration_minutes_raw is not None:
+        try:
+            duration_minutes = max(1, int(duration_minutes_raw))
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "duration_minutes must be a positive number when provided."}), 400
 
     appliance_ids = body.get("appliance_ids")
     if appliance_ids is None:
@@ -230,6 +254,7 @@ def request_change():
         "uid": uid,
         "target_state": target_state,
         "appliance_ids": appliance_ids,
+        "duration_minutes": duration_minutes,
     }
 
     try:
@@ -257,7 +282,21 @@ def request_change():
 
         changed_appliances = pick_changed_appliances(automator_payload)
         forecast_summary = pick_forecast_summary(automator_payload)
-        confirmation_text = build_confirmation_text(changed_appliances, forecast_summary)
+        override_until = None
+        if changed_appliances:
+            first_override = changed_appliances[0].get("manualOverride")
+            if isinstance(first_override, dict):
+                override_until = first_override.get("until")
+                if not isinstance(override_until, str):
+                    override_until = None
+
+        confirmation_text = build_confirmation_text(
+            changed_appliances,
+            forecast_summary,
+            target_state,
+            duration_minutes,
+            override_until,
+        )
 
         history_ack = None
         if changed_appliances:
@@ -268,6 +307,7 @@ def request_change():
                 "success": True,
                 "uid": uid,
                 "target_state": target_state,
+                "duration_minutes": duration_minutes,
                 "changed_appliances": changed_appliances,
                 "forecast": forecast_summary,
                 "confirmation_text": confirmation_text,

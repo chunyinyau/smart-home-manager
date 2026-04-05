@@ -10,6 +10,7 @@ export interface RequestChangeResult {
   success?: boolean;
   error?: string;
   confirmation_text?: string;
+  duration_minutes?: number | null;
   changed_appliances?: Array<{
     id?: string;
     name?: string;
@@ -33,12 +34,14 @@ export async function requestChange(params: {
   uid?: string;
   aid?: string;
   targetState?: "OFF" | "ON";
+  durationMinutes?: number;
 }): Promise<RequestChangeResult> {
   const applianceIds = params.aid ? [params.aid] : undefined;
   const payload = {
     uid: params.uid ?? DEMO_UID,
     appliance_ids: applianceIds,
     target_state: params.targetState ?? "OFF",
+    duration_minutes: params.durationMinutes,
   };
 
   const publicResponse = await fetchPublicEndpoint(
@@ -72,7 +75,9 @@ export async function requestChange(params: {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        ...payload,
+      }),
       timeoutMs: 12000,
     },
   );

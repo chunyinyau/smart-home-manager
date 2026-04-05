@@ -8,6 +8,7 @@ export async function POST(request: Request) {
           uid?: string;
           aid?: string;
           targetState?: "OFF" | "ON";
+          durationMinutes?: number;
         }
       | null;
 
@@ -15,6 +16,7 @@ export async function POST(request: Request) {
       uid: body?.uid,
       aid: body?.aid,
       targetState: body?.targetState,
+      durationMinutes: body?.durationMinutes,
     });
 
     return NextResponse.json(result);

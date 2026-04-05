@@ -3,6 +3,21 @@ const DEFAULT_BUDGET_USER_ID = "1";
 const DEFAULT_HISTORY_USER_ID = "user_demo_001";
 const DEFAULT_UPDATEBUDGET_CAP_DELTA = 200;
 const DEFAULT_UPDATEBUDGET_HISTORY_WAIT_MS = 1500;
+const DEFAULT_SMOKE_HOST = "127.0.0.1";
+const DEFAULT_SMOKE_PORT_OFFSET = 0;
+
+function parsePortOffset(value) {
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_SMOKE_PORT_OFFSET;
+  }
+
+  return parsed;
+}
+
+function serviceDefaultUrl(host, basePort, offset) {
+  return `http://${host}:${basePort + offset}`;
+}
 
 function normalizeBaseUrl(url) {
   return url.replace(/\/+$/, "");
@@ -48,54 +63,58 @@ const updateBudgetHistoryWaitMs = Number.parseInt(
     ?? String(DEFAULT_UPDATEBUDGET_HISTORY_WAIT_MS),
   10,
 );
+const smokeHost = process.env.SMOKE_HOST ?? DEFAULT_SMOKE_HOST;
+const smokePortOffset = parsePortOffset(
+  process.env.SMOKE_PORT_OFFSET ?? String(DEFAULT_SMOKE_PORT_OFFSET),
+);
 
 const serviceBaseUrls = {
-  appliance: resolveBaseUrl("http://localhost:5002", [
+  appliance: resolveBaseUrl(serviceDefaultUrl(smokeHost, 5002, smokePortOffset), [
     "SMOKE_APPLIANCE_SERVICE_URL",
     "APPLIANCE_SERVICE_BASE_URL",
     "APPLIANCE_SERVICE_URL",
   ]),
-  bill: resolveBaseUrl("http://localhost:5003", [
+  bill: resolveBaseUrl(serviceDefaultUrl(smokeHost, 5003, smokePortOffset), [
     "SMOKE_BILL_SERVICE_URL",
     "BILL_SERVICE_BASE_URL",
     "BILL_SERVICE_URL",
   ]),
-  budget: resolveBaseUrl("http://localhost:5004", [
+  budget: resolveBaseUrl(serviceDefaultUrl(smokeHost, 5004, smokePortOffset), [
     "SMOKE_BUDGET_SERVICE_URL",
     "BUDGET_SERVICE_BASE_URL",
     "BUDGET_SERVICE_URL",
   ]),
-  history: resolveBaseUrl("http://localhost:5005", [
+  history: resolveBaseUrl(serviceDefaultUrl(smokeHost, 5005, smokePortOffset), [
     "SMOKE_HISTORY_SERVICE_URL",
     "HISTORY_SERVICE_BASE_URL",
     "HISTORY_SERVICE_URL",
   ]),
-  rate: resolveBaseUrl("http://localhost:5007", [
+  rate: resolveBaseUrl(serviceDefaultUrl(smokeHost, 5007, smokePortOffset), [
     "SMOKE_RATE_SERVICE_URL",
     "RATE_SERVICE_BASE_URL",
     "RATE_SERVICE_URL",
   ]),
-  calculatebill: resolveBaseUrl("http://localhost:5008", [
+  calculatebill: resolveBaseUrl(serviceDefaultUrl(smokeHost, 5008, smokePortOffset), [
     "SMOKE_CALCULATEBILL_SERVICE_URL",
     "CALCULATEBILL_SERVICE_BASE_URL",
     "CALCULATEBILL_SERVICE_URL",
   ]),
-  forecastbill: resolveBaseUrl("http://localhost:5009", [
+  forecastbill: resolveBaseUrl(serviceDefaultUrl(smokeHost, 5009, smokePortOffset), [
     "SMOKE_FORECASTBILL_SERVICE_URL",
     "FORECASTBILL_SERVICE_BASE_URL",
     "FORECASTBILL_SERVICE_URL",
   ]),
-  updatebudget: resolveBaseUrl("http://localhost:5012", [
+  updatebudget: resolveBaseUrl(serviceDefaultUrl(smokeHost, 5012, smokePortOffset), [
     "SMOKE_UPDATEBUDGET_SERVICE_URL",
     "UPDATEBUDGET_SERVICE_BASE_URL",
     "UPDATEBUDGET_SERVICE_URL",
   ]),
-  requestchange: resolveBaseUrl("http://localhost:5011", [
+  requestchange: resolveBaseUrl(serviceDefaultUrl(smokeHost, 5011, smokePortOffset), [
     "SMOKE_REQUEST_CHANGE_SERVICE_URL",
     "REQUEST_CHANGE_SERVICE_BASE_URL",
     "REQUEST_CHANGE_SERVICE_URL",
   ]),
-  changestate: resolveBaseUrl("http://localhost:5010", [
+  changestate: resolveBaseUrl(serviceDefaultUrl(smokeHost, 5010, smokePortOffset), [
     "SMOKE_CHANGE_STATE_SERVICE_URL",
     "CHANGE_STATE_SERVICE_BASE_URL",
     "CHANGE_STATE_SERVICE_URL",
@@ -709,6 +728,8 @@ async function runUpdateBudgetWorkflowCheck() {
 
 async function main() {
   console.log("Smart Home Manager API smoke test");
+  console.log(`Smoke host: ${smokeHost}`);
+  console.log(`Smoke port offset: ${smokePortOffset}`);
   console.log("Service Base URLs:");
   console.log(`- appliance-service: ${serviceBaseUrls.appliance}`);
   console.log(`- bill-service: ${serviceBaseUrls.bill}`);

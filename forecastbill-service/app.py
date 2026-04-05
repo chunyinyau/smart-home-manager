@@ -5,6 +5,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urljoin
+from zoneinfo import ZoneInfo
 
 import requests
 from flask import Flask, jsonify, request
@@ -22,6 +23,7 @@ except Exception:
 
 BILL_SERVICE_URL = os.getenv("BILL_SERVICE_URL", "http://bill_service:5003")
 BUDGET_SERVICE_URL = os.getenv("BUDGET_SERVICE_URL", "http://budget_service:5004")
+APPLIANCE_SERVICE_URL = os.getenv("APPLIANCE_SERVICE_URL", "http://appliance_service:5002")
 PROFILE_SERVICE_URL = os.getenv(
     "PROFILE_SERVICE_URL",
     "https://personal-2nbikeej.outsystemscloud.com/Profile/rest/Profile/profile",
@@ -32,8 +34,15 @@ DEFAULT_FORECAST_UID = os.getenv("DEFAULT_FORECAST_UID", "user_demo_001")
 DEFAULT_PROFILE_ID = os.getenv("DEFAULT_PROFILE_ID", "1")
 DEFAULT_HDB_TYPE = os.getenv("DEFAULT_HDB_TYPE", "4")
 DEFAULT_BASELINE_MONTHLY_KWH = float(os.getenv("DEFAULT_BASELINE_MONTHLY_KWH", "350"))
+SGT_TZ = ZoneInfo("Asia/Singapore")
 
 SERVICE_FALLBACK_URLS = {
+    "appliance": [
+        APPLIANCE_SERVICE_URL,
+        "http://host.docker.internal:5002",
+        "http://127.0.0.1:5002",
+        "http://localhost:5002",
+    ],
     "bill": [
         BILL_SERVICE_URL,
         "http://host.docker.internal:5003",
@@ -66,6 +75,10 @@ def parse_positive_int(value: Any) -> Optional[int]:
         return None
 
     return parsed
+
+
+def iso_sgt_now() -> str:
+    return datetime.now(SGT_TZ).isoformat()
 
 
 def parse_non_negative_int(value: Any) -> Optional[int]:
@@ -284,6 +297,93 @@ def fetch_budget_snapshot(user_id: int) -> tuple[float, float]:
         raise RuntimeError("budget-service cum_bill is invalid")
 
     return round(budget_cap, 2), round(last_month_cumulative_bill, 2)
+
+
+def fetch_appliance_snapshot(uid: str) -> list[dict[str, Any]]:
+    response = request_with_service_fallback(
+        "appliance",
+        "GET",
+        "/api/appliance",
+        params={"uid": uid},
+    )
+    payload = get_response_json(response)
+
+    if response.status_code != 200:
+        raise RuntimeError(
+            extract_error_message(payload, f"appliance-service returned HTTP {response.status_code}")
+        )
+
+    if not isinstance(payload, list):
+        return []
+    return [item for item in payload if isinstance(item, dict)]
+
+
+def month_end_boundary_utc(period_start: date) -> datetime:
+    if period_start.month == 12:
+        return datetime(period_start.year + 1, 1, 1, tzinfo=timezone.utc)
+    return datetime(period_start.year, period_start.month + 1, 1, tzinfo=timezone.utc)
+
+
+def estimate_active_override_savings(
+    appliances: list[dict[str, Any]],
+    now_utc: datetime,
+    period_start: date,
+    price_per_kwh: float,
+) -> dict[str, Any]:
+    savings_kwh = 0.0
+    savings_sgd = 0.0
+    month_end_utc = month_end_boundary_utc(period_start)
+    devices: list[dict[str, Any]] = []
+
+    for appliance in appliances:
+        override = appliance.get("manualOverride")
+        if not isinstance(override, dict):
+            continue
+
+        state = str(override.get("state") or "").upper()
+        active = bool(override.get("active"))
+        if state != "OFF" or not active:
+            continue
+
+        watts_estimate = parse_float(appliance.get("manualOverrideWattsEstimate"))
+        if watts_estimate is None or watts_estimate <= 0:
+            continue
+
+        override_until = parse_iso_datetime(override.get("until"))
+        if override_until is None:
+            effective_end = month_end_utc
+        else:
+            effective_end = min(override_until, month_end_utc)
+
+        if effective_end <= now_utc:
+            continue
+
+        remaining_hours = max((effective_end - now_utc).total_seconds() / 3600.0, 0.0)
+        if remaining_hours <= 0:
+            continue
+
+        saved_kwh = (watts_estimate * remaining_hours) / 1000.0
+        saved_sgd = saved_kwh * max(price_per_kwh, 0.0)
+        savings_kwh += saved_kwh
+        savings_sgd += saved_sgd
+
+        devices.append(
+            {
+                "applianceId": appliance.get("id"),
+                "name": appliance.get("name"),
+                "wattsEstimate": round(watts_estimate, 2),
+                "overrideUntil": override.get("until"),
+                "remainingHours": round(remaining_hours, 3),
+                "savedKwh": round(saved_kwh, 4),
+                "savedSgd": round(saved_sgd, 4),
+            }
+        )
+
+    return {
+        "estimatedSavedKwh": round(savings_kwh, 4),
+        "estimatedSavedSgd": round(savings_sgd, 4),
+        "activeOverrides": devices,
+    }
 
 
 def fetch_profile_snapshot(profile_id: str) -> dict[str, Any]:
@@ -599,6 +699,28 @@ def build_forecast(uid: str, user_id: int, profile_id: str) -> dict[str, Any]:
         round(current_average_daily_kwh * days_in_month, 2),
     )
 
+    appliance_snapshot = fetch_appliance_snapshot(uid)
+    implied_price_per_kwh = (
+        (projected_month_end_spend / projected_month_end_kwh)
+        if projected_month_end_kwh > 0
+        else 0.0
+    )
+    override_adjustment = estimate_active_override_savings(
+        appliance_snapshot,
+        now_utc,
+        current_period_start,
+        implied_price_per_kwh,
+    )
+
+    projected_month_end_spend = round(
+        max(projected_month_end_spend - float(override_adjustment["estimatedSavedSgd"]), current_period_total_cost),
+        2,
+    )
+    projected_month_end_kwh = round(
+        max(projected_month_end_kwh - float(override_adjustment["estimatedSavedKwh"]), current_period_total_kwh),
+        2,
+    )
+
     suggested_days_to_exceed = calculate_days_to_exceed(
         budget_cap,
         current_period_total_cost,
@@ -658,28 +780,53 @@ def build_forecast(uid: str, user_id: int, profile_id: str) -> dict[str, Any]:
 
     assessment = get_ai_assessment(ai_input, fallback_assessment)
 
-    projected_cost = round(float(assessment["projectedCost"]), 2)
-    projected_kwh = round(float(assessment["projectedKwh"]), 2)
+    ai_projected_cost = round(float(assessment["projectedCost"]), 2)
+    ai_projected_kwh = round(float(assessment["projectedKwh"]), 2)
+
+    adjusted_projected_cost = round(
+        max(ai_projected_cost - float(override_adjustment["estimatedSavedSgd"]), current_period_total_cost),
+        2,
+    )
+    adjusted_projected_kwh = round(
+        max(ai_projected_kwh - float(override_adjustment["estimatedSavedKwh"]), current_period_total_kwh),
+        2,
+    )
+
+    adjusted_risk_level = derive_risk_level(adjusted_projected_cost, budget_cap)
+    narrative = str(assessment.get("shortNarrative") or "").strip()
+    if float(override_adjustment["estimatedSavedSgd"]) > 0:
+        narrative = (
+            f"{narrative} Active manual overrides reduce projected spend by approximately "
+            f"${float(override_adjustment['estimatedSavedSgd']):.2f}."
+        ).strip()
+
+    days_to_exceed_adjusted = calculate_days_to_exceed(
+        budget_cap,
+        current_period_total_cost,
+        max((adjusted_projected_cost - current_period_total_cost) / max(days_remaining, 1), 0.0),
+    )
+
     effective_price_per_kwh = round(
-        projected_cost / projected_kwh,
+        adjusted_projected_cost / adjusted_projected_kwh,
         6,
-    ) if projected_kwh > 0 else 0.0
+    ) if adjusted_projected_kwh > 0 else 0.0
 
     return {
         "uid": uid,
         "userId": user_id,
         "month": current_month,
         "billingPeriodStart": current_period_start.isoformat(),
-        "generatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "projectedKwh": projected_kwh,
-        "projectedCost": projected_cost,
-        "reasoning": assessment["shortNarrative"],
-        "riskLevel": assessment["riskLevel"],
-        "daysToExceed": assessment["daysToExceed"],
-        "shortNarrative": assessment["shortNarrative"],
+        "generatedAt": iso_sgt_now(),
+        "projectedKwh": adjusted_projected_kwh,
+        "projectedCost": adjusted_projected_cost,
+        "reasoning": narrative,
+        "riskLevel": adjusted_risk_level,
+        "daysToExceed": days_to_exceed_adjusted,
+        "shortNarrative": narrative,
         "recommendedAppliances": assessment["recommendedAppliances"],
         "recommendations": assessment["recommendedAppliances"],
         "model": assessment.get("model"),
+        "overrideAdjustment": override_adjustment,
         "billing": {
             "currentPeriodHistory": public_history,
             "currentPeriodTotalCost": round(current_period_total_cost, 2),
@@ -716,7 +863,13 @@ def home() -> Any:
         {
             "status": "online",
             "service": "ForecastBill Composite Microservice",
-            "endpoints": ["GET /api/forecast", "POST /api/forecast", "POST /api/forecastbill"],
+            "endpoints": [
+                "GET /api/forecast",
+                "POST /api/forecast",
+                "POST /api/forecastbill",
+                "GET /api/forecast/recommendation",
+                "POST /api/forecast/recommendation",
+            ],
         }
     )
 
@@ -772,9 +925,217 @@ def handle_forecast_request() -> Any:
         return jsonify({"error": "Failed to generate forecast", "details": str(error)}), 500
 
 
+def build_recommendation_plan(uid: str, user_id: int, profile_id: str) -> dict[str, Any]:
+    forecast = build_forecast(uid, user_id, profile_id)
+    appliances = fetch_appliance_snapshot(uid)
+
+    active = [
+        appliance
+        for appliance in appliances
+        if str(appliance.get("state", "")).upper() == "ON"
+    ]
+
+    risk_level = str(forecast.get("riskLevel") or "SAFE").upper()
+
+    if risk_level == "SAFE":
+        projected_cost = float(forecast.get("projectedCost") or 0)
+        return {
+            "uid": uid,
+            "userId": user_id,
+            "generatedAt": iso_sgt_now(),
+            "currentRiskLevel": risk_level,
+            "predictedRiskLevel": "SAFE",
+            "currentProjectedCost": round(projected_cost, 2),
+            "projectedCostAfterPlan": round(projected_cost, 2),
+            "estimatedTotalSavingsSgd": 0.0,
+            "recommendedDurationMinutes": 0,
+            "recommendations": [],
+            "target": {
+                "targetRiskLevel": "SAFE",
+                "requiredSavingsForSafeSgd": 0.0,
+                "remainingSavingsForSafeSgd": 0.0,
+                "met": True,
+            },
+            "aiHints": forecast.get("recommendations") or forecast.get("recommendedAppliances") or [],
+            "strategy": "no-action-safe",
+        }
+
+    blocked_types = {"essential", "infrastructure"}
+    blocked_name_tokens = {"fridge", "refrigerator", "smart panel", "main panel", "distribution board"}
+    min_watts_for_shutdown = 50.0
+
+    def is_shutdown_recommendable(appliance: dict[str, Any], min_watts: float) -> bool:
+        appliance_type = str(appliance.get("type") or "").strip().lower()
+        appliance_name = str(appliance.get("name") or "").strip().lower()
+        watts = max(0.0, float(appliance.get("currentWatts") or 0))
+
+        if appliance_type in blocked_types:
+            return False
+        if any(token in appliance_name for token in blocked_name_tokens):
+            return False
+        if watts < min_watts:
+            return False
+
+        return True
+
+    min_duration_by_risk = {
+        "CRITICAL": 120,
+        "HIGH": 60,
+        "SAFE": 30,
+    }
+    max_devices_by_risk = {
+        "CRITICAL": 3,
+        "HIGH": 2,
+        "SAFE": 1,
+    }
+    max_duration_by_risk = {
+        "CRITICAL": 360,
+        "HIGH": 180,
+        "SAFE": 60,
+    }
+
+    duration_minutes = min_duration_by_risk.get(risk_level, 30)
+    max_devices = max_devices_by_risk.get(risk_level, 1)
+    max_duration_minutes = max_duration_by_risk.get(risk_level, 1440)
+
+    recommendable_active = [
+        appliance
+        for appliance in active
+        if is_shutdown_recommendable(appliance, min_watts_for_shutdown)
+    ]
+
+    # If strict filtering yields no actions in HIGH/CRITICAL, relax only the watt threshold.
+    if not recommendable_active and risk_level in {"HIGH", "CRITICAL"}:
+        recommendable_active = [
+            appliance
+            for appliance in active
+            if is_shutdown_recommendable(appliance, 1.0)
+        ]
+
+    ranked = sorted(
+        recommendable_active,
+        key=lambda appliance: (
+            -float(appliance.get("currentWatts") or 0),
+            int(appliance.get("priority") or 99),
+        ),
+    )
+    selected = ranked[:max_devices]
+
+    price_per_kwh = float(((forecast.get("rate") or {}).get("pricePerKwh") or 0) or 0)
+    projected_cost = float(forecast.get("projectedCost") or 0)
+    budget_cap = float(((forecast.get("budget") or {}).get("budgetCap") or 0) or 0)
+
+    safe_threshold_ratio = 0.85
+    safe_target_cost = (budget_cap * safe_threshold_ratio) - 0.01 if budget_cap > 0 else projected_cost
+    required_savings_for_safe = 0.0
+    if risk_level in {"HIGH", "CRITICAL"}:
+        required_savings_for_safe = max(projected_cost - safe_target_cost, 0.0)
+
+    plan_items: list[dict[str, Any]] = []
+    total_savings = 0.0
+    remaining_savings_for_safe = required_savings_for_safe
+
+    for appliance in selected:
+        watts = max(0.0, float(appliance.get("currentWatts") or 0))
+        if watts <= 0:
+            continue
+
+        savings_per_minute = 0.0
+        if price_per_kwh > 0:
+            savings_per_minute = ((watts / 1000.0) * price_per_kwh) / 60.0
+
+        suggested_duration_minutes = duration_minutes
+        if remaining_savings_for_safe > 0 and savings_per_minute > 0:
+            required_minutes = int((remaining_savings_for_safe / savings_per_minute) + 0.9999)
+            suggested_duration_minutes = max(suggested_duration_minutes, required_minutes)
+
+        suggested_duration_minutes = max(1, min(suggested_duration_minutes, max_duration_minutes))
+
+        saved_kwh = (watts * (suggested_duration_minutes / 60.0)) / 1000.0
+        saved_sgd = round(saved_kwh * price_per_kwh, 4)
+        total_savings += saved_sgd
+        remaining_savings_for_safe = max(required_savings_for_safe - total_savings, 0.0)
+
+        plan_items.append(
+            {
+                "applianceId": appliance.get("id"),
+                "name": appliance.get("name"),
+                "currentWatts": int(watts),
+                "priority": appliance.get("priority"),
+                "suggestedDurationMinutes": suggested_duration_minutes,
+                "estimatedSavingsSgd": saved_sgd,
+            }
+        )
+
+        if remaining_savings_for_safe <= 0 and risk_level in {"HIGH", "CRITICAL"}:
+            break
+
+    adjusted_projected_cost = round(max(projected_cost - total_savings, 0.0), 2)
+    predicted_risk = derive_risk_level(adjusted_projected_cost, budget_cap)
+    recommended_duration_minutes = max(
+        (int(item.get("suggestedDurationMinutes") or duration_minutes) for item in plan_items),
+        default=duration_minutes,
+    )
+
+    return {
+        "uid": uid,
+        "userId": user_id,
+        "generatedAt": iso_sgt_now(),
+        "currentRiskLevel": forecast.get("riskLevel"),
+        "predictedRiskLevel": predicted_risk,
+        "currentProjectedCost": round(projected_cost, 2),
+        "projectedCostAfterPlan": adjusted_projected_cost,
+        "estimatedTotalSavingsSgd": round(total_savings, 4),
+        "recommendedDurationMinutes": recommended_duration_minutes,
+        "recommendations": plan_items,
+        "target": {
+            "targetRiskLevel": "SAFE",
+            "requiredSavingsForSafeSgd": round(required_savings_for_safe, 4),
+            "remainingSavingsForSafeSgd": round(remaining_savings_for_safe, 4),
+            "met": predicted_risk == "SAFE",
+        },
+        "aiHints": forecast.get("recommendations") or forecast.get("recommendedAppliances") or [],
+        "strategy": (
+            "adaptive-safe-target-with-ai-hints-low-watt-fallback"
+            if not [
+                appliance
+                for appliance in active
+                if is_shutdown_recommendable(appliance, min_watts_for_shutdown)
+            ]
+            else "adaptive-safe-target-with-ai-hints"
+        ),
+    }
+
+
+def handle_recommendation_request() -> Any:
+    uid, user_id, profile_id = resolve_request_context()
+
+    try:
+        return jsonify(build_recommendation_plan(uid, user_id, profile_id)), 200
+    except requests.RequestException as error:
+        return (
+            jsonify(
+                {
+                    "error": "Downstream microservice is unreachable",
+                    "details": str(error),
+                }
+            ),
+            503,
+        )
+    except RuntimeError as error:
+        return jsonify({"error": str(error)}), 502
+    except Exception as error:
+        return jsonify({"error": "Failed to generate recommendation", "details": str(error)}), 500
+
+
 @app.route("/api/forecast", methods=["GET", "POST"])
 def get_forecast() -> Any:
     return handle_forecast_request()
+
+
+@app.route("/api/forecast/recommendation", methods=["GET", "POST"])
+def get_forecast_recommendation() -> Any:
+    return handle_recommendation_request()
 
 
 @app.route("/api/forecastbill", methods=["POST"])

@@ -92,6 +92,8 @@ Optional environment variables:
 
 - `SMOKE_BASE_URL` (default: `http://localhost:3000`)
 - `SMOKE_TIMEOUT_MS` (default: `15000`)
+- `SMOKE_HOST` (default: `127.0.0.1`)
+- `SMOKE_PORT_OFFSET` (default: `0`) - shifts all default direct service ports by the same amount (for example, `100` maps `5002` -> `5102`)
 - `SMOKE_BUDGET_USER_ID` (default: `1`)
 - `SMOKE_HISTORY_USER_ID` (default: `user_demo_001`)
 - `SMOKE_RATE_SERVICE_URL` (default: `http://localhost:5007`)
@@ -110,6 +112,12 @@ When `SMOKE_PUBLIC_GATEWAY_BASE_URL` is set, the smoke test also checks these pu
 - `PUT /updatebudget/api/updatebudget/1`
 - `POST /request-change/api/request-change`
 - `POST /change-appliance-state/api/change-appliance-state`
+
+PowerShell example using unique ports:
+
+```powershell
+$env:SMOKE_PORT_OFFSET='100'; npm run smoke:test
+```
 
 ## Kong Gateway
 

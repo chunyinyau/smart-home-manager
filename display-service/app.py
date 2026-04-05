@@ -1,7 +1,8 @@
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import requests
 from flask import Flask, jsonify, request
@@ -21,6 +22,7 @@ PROFILE_SERVICE_URL   = os.getenv(
 )
 
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "8"))
+SGT_TZ = ZoneInfo("Asia/Singapore")
 
 SERVICE_FALLBACK_URLS = {
     "budget": [
@@ -242,7 +244,7 @@ def display():
     payload = {
         "uid":         uid,
         "profile_id":  profile_id,
-        "fetched_at":  datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "fetched_at":  datetime.now(SGT_TZ).isoformat(),
         "budget":      results.get("budget",     {}).get("data"),
         "forecast":    results.get("forecast",   {}).get("data"),
         "history":     results.get("history",    {}).get("data"),

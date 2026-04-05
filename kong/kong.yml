@@ -66,18 +66,18 @@ services:
           - /forecast
         strip_path: true
 
-  - name: state-change-automator-service
-    url: http://state_change_automator_service:5010
+  - name: change-state-service
+    url: http://change_state_service:5010
     routes:
-      - name: state-change-automator-root
+      - name: change-state-root
         paths:
           - /state-change-automator
         strip_path: true
 
-  - name: change-appliance-state-service
-    url: http://change_appliance_state_service:5011
+  - name: request-change-service
+    url: http://request_change_service:5011
     routes:
-      - name: change-appliance-state-root
+      - name: request-change-root
         paths:
           - /change-appliance-state
         strip_path: true

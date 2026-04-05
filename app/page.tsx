@@ -43,6 +43,46 @@ type CalculateBillStatePayload = {
   >;
 };
 
+type ForecastRecommendationPayload = {
+  currentRiskLevel?: "SAFE" | "HIGH" | "CRITICAL";
+  predictedRiskLevel?: "SAFE" | "HIGH" | "CRITICAL";
+  recommendedDurationMinutes?: number;
+  recommendations?: Array<{
+    applianceId?: string;
+    name?: string;
+    suggestedDurationMinutes?: number;
+    estimatedSavingsSgd?: number;
+  }>;
+};
+
+type RecommendedActionItem = {
+  applianceId: string;
+  name: string;
+  durationMinutes: number;
+  estimatedSavingsSgd?: number;
+};
+
+function formatUtcTimestamp(value: string | null | undefined): string {
+  if (!value) {
+    return 'N/A';
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return 'Invalid timestamp';
+  }
+
+  const sgt = new Date(parsed.getTime() + 8 * 60 * 60 * 1000);
+  const year = sgt.getUTCFullYear();
+  const month = String(sgt.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(sgt.getUTCDate()).padStart(2, '0');
+  const hour = String(sgt.getUTCHours()).padStart(2, '0');
+  const minute = String(sgt.getUTCMinutes()).padStart(2, '0');
+  const second = String(sgt.getUTCSeconds()).padStart(2, '0');
+
+  return `${year}-${month}-${day} ${hour}:${minute}:${second} SGT`;
+}
+
 export default function App() {
   const [currentRate, setCurrentRate] = useState<number | null>(null);
   const [data, setData] = useState<DisplayPayload | null>(null);
@@ -52,7 +92,7 @@ export default function App() {
   const [billRunResult, setBillRunResult] = useState<CalculateBillRunPayload | null>(null);
   const [billRunError, setBillRunError] = useState<string | null>(null);
   const [dataMenuOpen, setDataMenuOpen] = useState(false);
-  const [suggestedActionsOpen, setSuggestedActionsOpen] = useState(false);
+  const [suggestedActionsOpen, setSuggestedActionsOpen] = useState(true);
   const [cronState, setCronState] = useState<CalculateBillStatePayload["data"] | null>(null);
   const [cronStateLoading, setCronStateLoading] = useState(true);
   const [cronStateError, setCronStateError] = useState<string | null>(null);
@@ -65,12 +105,16 @@ export default function App() {
   const [automationFeedback, setAutomationFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [applianceMenuOpen, setApplianceMenuOpen] = useState(false);
   const [togglingApplianceId, setTogglingApplianceId] = useState<string | null>(null);
+  const [forecastRecommendation, setForecastRecommendation] = useState<ForecastRecommendationPayload | null>(null);
+  const [applyingActionId, setApplyingActionId] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const fetchDashboardData = async (isManual = false) => {
     try {
-      const [rateResponse, displayResponse] = await Promise.all([
+      const [rateResponse, displayResponse, recommendationResponse] = await Promise.all([
         fetch('/api/rate', { cache: 'no-store' }),
         fetch(`/api/display?uid=${DEMO_UID}&profile_id=1`, { cache: 'no-store' }),
+        fetch(`/api/forecast/recommendation?uid=${DEMO_UID}`, { cache: 'no-store' }),
       ]);
 
       const ratePayload = await rateResponse.json();
@@ -81,6 +125,13 @@ export default function App() {
 
       const displayPayload = await displayResponse.json();
       setData(displayPayload);
+
+      if (recommendationResponse.ok) {
+        const recommendationPayload = (await recommendationResponse.json()) as ForecastRecommendationPayload;
+        setForecastRecommendation(recommendationPayload);
+      } else {
+        setForecastRecommendation(null);
+      }
 
       // If persisted budget is still zero after restart, show immediate CSV-derived accrual.
       const budgetCumBill = Number(displayPayload?.budget?.cum_bill ?? 0);
@@ -293,9 +344,51 @@ export default function App() {
     }
   };
 
+  const handleApplySuggestedAction = async (action: RecommendedActionItem) => {
+    setApplyingActionId(action.applianceId);
+    setActionFeedback(null);
+
+    try {
+      const response = await fetch('/api/request-change', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          uid: DEMO_UID,
+          aid: action.applianceId,
+          targetState: 'OFF',
+          durationMinutes: action.durationMinutes,
+        }),
+      });
+
+      const payload = await response.json();
+      if (!response.ok || payload?.error) {
+        throw new Error(payload?.error || `HTTP ${response.status}`);
+      }
+
+      setActionFeedback({
+        type: 'success',
+        message: `${action.name} set OFF for ${action.durationMinutes} min.`,
+      });
+      await fetchDashboardData(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to apply action';
+      setActionFeedback({ type: 'error', message });
+    } finally {
+      setApplyingActionId(null);
+    }
+  };
+
   const budget = data?.budget;
   const forecast = data?.forecast;
-  const fallbackMonth = new Date().toISOString().slice(0, 7);
+  const fallbackMonth = (() => {
+    const now = new Date();
+    const sgt = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+    const year = sgt.getUTCFullYear();
+    const month = String(sgt.getUTCMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  })();
   const displayedAccruedSpend = (() => {
     const persisted = Number(budget?.cum_bill ?? 0);
     if (persisted > 0) {
@@ -312,16 +405,56 @@ export default function App() {
     forecast.riskLevel === 'CRITICAL' ? 'text-rose-600' :
     forecast.riskLevel === 'HIGH' ? 'text-amber-500' :
     'text-emerald-600';
+  const isActionableRisk = forecast?.riskLevel === 'HIGH' || forecast?.riskLevel === 'CRITICAL';
   const suggestedAppliances = Array.from(
     new Set(
-      [
-        ...(Array.isArray(forecast?.recommendedAppliances) ? forecast.recommendedAppliances : []),
-        ...(Array.isArray(forecast?.recommendations) ? forecast.recommendations : []),
-      ]
+      (isActionableRisk
+        ? [
+            ...(Array.isArray(forecast?.recommendedAppliances) ? forecast.recommendedAppliances : []),
+            ...(Array.isArray(forecast?.recommendations) ? forecast.recommendations : []),
+          ]
+        : [])
         .map((item) => (typeof item === 'string' ? item.trim() : ''))
         .filter((item) => item.length > 0),
     ),
   );
+  const suggestedActionItems =
+    (isActionableRisk ? forecastRecommendation?.recommendations : [])
+      ?.map((item) => {
+        const name = (item.name || 'Appliance').trim();
+        const defaultDuration = forecastRecommendation?.recommendedDurationMinutes ?? 0;
+        const duration = Number(item.suggestedDurationMinutes ?? defaultDuration);
+        if (!Number.isFinite(duration) || duration <= 0) {
+          return `${name}: OFF`;
+        }
+        return `${name}: OFF ${Math.round(duration)} min`;
+      })
+      .filter((item) => item.length > 0) ?? [];
+  const recommendedActionItems: RecommendedActionItem[] =
+    (isActionableRisk ? forecastRecommendation?.recommendations : [])
+      ?.map((item): RecommendedActionItem | null => {
+        const applianceId = typeof item.applianceId === 'string' ? item.applianceId : '';
+        const name = (item.name || 'Appliance').trim();
+        const defaultDuration = forecastRecommendation?.recommendedDurationMinutes ?? 0;
+        const duration = Number(item.suggestedDurationMinutes ?? defaultDuration);
+
+        if (!applianceId || !Number.isFinite(duration) || duration <= 0) {
+          return null;
+        }
+
+        const action: RecommendedActionItem = {
+          applianceId,
+          name,
+          durationMinutes: Math.round(duration),
+        };
+
+        if (typeof item.estimatedSavingsSgd === 'number') {
+          action.estimatedSavingsSgd = item.estimatedSavingsSgd;
+        }
+
+        return action;
+      })
+      .filter((item): item is RecommendedActionItem => item !== null) ?? [];
 
   return (
     <div className="flex h-screen bg-white text-gray-900 font-sans selection:bg-blue-100">
@@ -518,7 +651,7 @@ export default function App() {
           <div className="flex items-center text-sm font-medium text-gray-600 gap-2 min-w-max">
             <div className="flex items-center gap-2 border border-blue-200 bg-blue-50/50 px-3 py-1.5 rounded-md hover:bg-blue-50 transition-colors">
               <span className="w-5 h-5 bg-blue-600 text-white border border-blue-600 rounded-full flex items-center justify-center text-[10px] font-black shadow-sm">W</span>
-              <span className="font-bold text-blue-900 tracking-tight">waatch-ing</span>
+              <span className="font-bold text-blue-900 tracking-tight">wattch-ing</span>
               <span className="bg-blue-600 px-1.5 py-0.5 rounded text-[9px] uppercase font-black text-white shadow-sm">Active</span>
             </div>
             <ChevronRight className="w-4 h-4 text-gray-300" />
@@ -637,7 +770,7 @@ export default function App() {
                     <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
                       <div className="text-xs uppercase tracking-wider text-gray-500">Generated At</div>
                       <div className="text-sm font-semibold text-gray-900 mt-2">
-                        {new Date(forecast.generatedAt).toLocaleString()}
+                        {formatUtcTimestamp(forecast.generatedAt)}
                       </div>
                     </div>
                   </div>
@@ -670,7 +803,17 @@ export default function App() {
                         : 'max-h-0 opacity-0'
                     }`}
                   >
-                    {suggestedAppliances.length === 0 ? (
+                    {!isActionableRisk ? (
+                      <div className="text-sm text-blue-600/80">Risk is SAFE. No shutdown action needed now.</div>
+                    ) : suggestedActionItems.length > 0 ? (
+                      <ul className="space-y-2">
+                        {suggestedActionItems.map((item) => (
+                          <li key={item} className="text-sm text-blue-700 leading-6">
+                            • {item}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : suggestedAppliances.length === 0 ? (
                       <div className="text-sm text-blue-600/80">No appliance shutdown suggestions available yet.</div>
                     ) : (
                       <ul className="space-y-2">
@@ -680,6 +823,40 @@ export default function App() {
                           </li>
                         ))}
                       </ul>
+                    )}
+
+                    {recommendedActionItems.length > 0 && (
+                      <div className="mt-4 space-y-2 border-t border-blue-200 pt-3">
+                        {recommendedActionItems.map((item) => (
+                          <div
+                            key={`${item.applianceId}-${item.durationMinutes}`}
+                            className="flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2"
+                          >
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-semibold text-blue-700">{item.name}</div>
+                              <div className="text-xs text-blue-600/80">
+                                OFF {item.durationMinutes} min
+                                {typeof item.estimatedSavingsSgd === 'number'
+                                  ? ` · Save ${item.estimatedSavingsSgd > 0 && item.estimatedSavingsSgd < 0.01 ? '<$0.01' : `$${item.estimatedSavingsSgd.toFixed(2)}`}`
+                                  : ''}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleApplySuggestedAction(item)}
+                              disabled={applyingActionId === item.applianceId}
+                              className="shrink-0 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                            >
+                              {applyingActionId === item.applianceId ? 'Applying' : 'Apply'}
+                            </button>
+                          </div>
+                        ))}
+                        {actionFeedback && (
+                          <p className={`text-xs font-medium ${actionFeedback.type === 'success' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {actionFeedback.message}
+                          </p>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -703,7 +880,7 @@ export default function App() {
                 history.slice(0, 5).map((log) => (
                   <div key={log.log_id} className="flex items-start gap-4 p-3 hover:bg-gray-50 rounded-lg transition-colors border-l-2 border-blue-500">
                     <div className="min-w-[140px] text-[12px] font-bold text-gray-400 uppercase tracking-tight">
-                      {new Date(log.occurred_at).toLocaleString()}
+                      {formatUtcTimestamp(log.occurred_at)}
                     </div>
                     <div className="text-sm font-medium text-gray-700">
                       {log.message}
@@ -748,7 +925,7 @@ export default function App() {
                 <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
                   <div className="text-xs uppercase tracking-wider text-gray-500">Last Updated</div>
                   <div className="text-sm font-semibold text-gray-900 mt-2">
-                    {data?.fetched_at ? new Date(data.fetched_at).toLocaleString() : 'Warming up'}
+                    {data?.fetched_at ? formatUtcTimestamp(data.fetched_at) : 'Warming up'}
                   </div>
                 </div>
               </div>
@@ -768,7 +945,7 @@ export default function App() {
                   <div className="text-xs uppercase tracking-wider text-gray-500">Last Updated</div>
                   <div className="text-sm font-semibold text-gray-900 mt-2">
                     {cronUserState.updated_at
-                      ? new Date(cronUserState.updated_at).toLocaleString()
+                      ? formatUtcTimestamp(cronUserState.updated_at)
                       : 'Unknown'}
                   </div>
                 </div>

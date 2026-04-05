@@ -1,12 +1,14 @@
 import decimal
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import inspect, text
 
 from telemetry_replay import TelemetryReplayStore
 
@@ -14,6 +16,7 @@ DEMO_UID = "user_demo_001"
 DEFAULT_SEED_FILE = Path("/app/seed/appliances.json")
 DEFAULT_TELEMETRY_CSV = Path("/app/data/appliance_energy_data.csv")
 DEFAULT_TELEMETRY_STATE_FILE = Path("/app/data/appliance_telemetry_state.json")
+SGT_TZ = ZoneInfo("Asia/Singapore")
 
 
 def get_cors_origins():
@@ -109,6 +112,11 @@ class Appliance(db.Model):
     current_watts = db.Column(db.Integer, nullable=False)
     kwh_used = db.Column(db.Numeric(10, 4), nullable=False)
     last_seen_at = db.Column(db.String(32), nullable=False)
+    manual_override_state = db.Column(db.String(3), nullable=True)
+    manual_override_until = db.Column(db.String(32), nullable=True)
+    manual_override_reason = db.Column(db.String(120), nullable=True)
+    manual_override_set_at = db.Column(db.String(32), nullable=True)
+    manual_override_watts_estimate = db.Column(db.Integer, nullable=True)
 
     def to_dict(self):
         return {
@@ -126,11 +134,111 @@ class Appliance(db.Model):
                 else self.kwh_used
             ),
             "lastSeenAt": self.last_seen_at,
+            "manualOverride": {
+                "state": self.manual_override_state,
+                "until": self.manual_override_until,
+                "reason": self.manual_override_reason,
+                "setAt": self.manual_override_set_at,
+                "active": is_override_active(self),
+            },
+            "manualOverrideWattsEstimate": self.manual_override_watts_estimate,
         }
 
 
 def current_timestamp() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(SGT_TZ).isoformat()
+
+
+def parse_iso_utc(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def is_override_active(appliance: Appliance) -> bool:
+    state = (appliance.manual_override_state or "").upper()
+    if state not in {"OFF", "ON"}:
+        return False
+
+    until_dt = parse_iso_utc(appliance.manual_override_until)
+    if until_dt is None:
+        return True
+
+    return datetime.now(timezone.utc) < until_dt
+
+
+def clear_override(appliance: Appliance) -> None:
+    appliance.manual_override_state = None
+    appliance.manual_override_until = None
+    appliance.manual_override_reason = None
+    appliance.manual_override_set_at = None
+    appliance.manual_override_watts_estimate = None
+
+
+def apply_manual_override(appliance: Appliance) -> None:
+    if not appliance.manual_override_state:
+        return
+
+    if not is_override_active(appliance):
+        clear_override(appliance)
+        return
+
+    if appliance.manual_override_state.upper() == "OFF":
+        appliance.state = "OFF"
+        appliance.current_watts = 0
+    elif appliance.manual_override_state.upper() == "ON" and appliance.current_watts <= 0:
+        appliance.state = "ON"
+
+
+def set_manual_override(
+    appliance: Appliance,
+    *,
+    target_state: str,
+    duration_minutes: int | None,
+    reason: str,
+) -> None:
+    baseline_watts = max(int(appliance.current_watts or 0), 0)
+    now = datetime.now(SGT_TZ)
+    appliance.manual_override_state = target_state
+    appliance.manual_override_set_at = now.isoformat()
+    appliance.manual_override_reason = reason
+    appliance.manual_override_watts_estimate = baseline_watts if target_state == "OFF" else None
+
+    if duration_minutes is None:
+        appliance.manual_override_until = None
+    else:
+        until = now + timedelta(minutes=max(duration_minutes, 1))
+        appliance.manual_override_until = until.isoformat()
+
+
+def ensure_override_columns() -> None:
+    inspector = inspect(db.engine)
+    columns = {col["name"] for col in inspector.get_columns("appliances")}
+
+    ddl_statements = []
+    if "manual_override_state" not in columns:
+        ddl_statements.append("ALTER TABLE appliances ADD COLUMN manual_override_state VARCHAR(3)")
+    if "manual_override_until" not in columns:
+        ddl_statements.append("ALTER TABLE appliances ADD COLUMN manual_override_until VARCHAR(32)")
+    if "manual_override_reason" not in columns:
+        ddl_statements.append("ALTER TABLE appliances ADD COLUMN manual_override_reason VARCHAR(120)")
+    if "manual_override_set_at" not in columns:
+        ddl_statements.append("ALTER TABLE appliances ADD COLUMN manual_override_set_at VARCHAR(32)")
+    if "manual_override_watts_estimate" not in columns:
+        ddl_statements.append("ALTER TABLE appliances ADD COLUMN manual_override_watts_estimate INTEGER")
+
+    for ddl in ddl_statements:
+        db.session.execute(text(ddl))
+    if ddl_statements:
+        db.session.commit()
 
 
 def default_seed_appliances() -> list[dict[str, object]]:
@@ -256,6 +364,7 @@ def sync_appliances_from_telemetry(uid: str) -> None:
         appliance.current_watts = watts
         appliance.kwh_used = kwh_used
         appliance.last_seen_at = now_ts
+        apply_manual_override(appliance)
 
     db.session.commit()
 
@@ -319,6 +428,7 @@ def home():
                 "/api/appliance",
                 "/api/appliance/<aid>",
                 "/api/appliance/<aid>/shutdown",
+                "/api/appliance/<aid>/power",
                 "/api/appliance/<aid>/priority",
             ],
         }
@@ -347,15 +457,72 @@ def get_appliance(aid: str):
 
 @app.route("/api/appliance/<aid>/shutdown", methods=["POST"])
 def shutdown_appliance(aid: str):
+    payload = request.get_json(silent=True) or {}
+    duration_minutes = payload.get("duration_minutes")
+    if duration_minutes is not None:
+        try:
+            duration_minutes = max(1, int(duration_minutes))
+        except (TypeError, ValueError):
+            return jsonify({"error": "duration_minutes must be a positive number."}), 400
+
     appliance, error_response = get_appliance_or_404(aid)
     if error_response:
         return error_response
 
+    set_manual_override(
+        appliance,
+        target_state="OFF",
+        duration_minutes=duration_minutes,
+        reason="manual_shutdown",
+    )
     appliance.state = "OFF"
     appliance.current_watts = 0
     appliance.last_seen_at = current_timestamp()
     db.session.commit()
     return jsonify(appliance.to_dict())
+
+
+@app.route("/api/appliance/<aid>/power", methods=["POST"])
+def power_appliance(aid: str):
+    appliance, error_response = get_appliance_or_404(aid)
+    if error_response:
+        return error_response
+
+    payload = request.get_json(silent=True) or {}
+    target_state = str(payload.get("target_state") or "").upper()
+    duration_raw = payload.get("duration_minutes")
+    duration_minutes = None
+
+    if target_state not in {"ON", "OFF"}:
+        return jsonify({"error": "target_state must be ON or OFF."}), 400
+
+    if duration_raw is not None:
+        try:
+            duration_minutes = max(1, int(duration_raw))
+        except (TypeError, ValueError):
+            return jsonify({"error": "duration_minutes must be a positive number."}), 400
+
+    if target_state == "OFF":
+        set_manual_override(
+            appliance,
+            target_state="OFF",
+            duration_minutes=duration_minutes,
+            reason="power_off_override",
+        )
+        appliance.state = "OFF"
+        appliance.current_watts = 0
+        appliance.last_seen_at = current_timestamp()
+        db.session.commit()
+        return jsonify(appliance.to_dict())
+
+    clear_override(appliance)
+    appliance.last_seen_at = current_timestamp()
+    db.session.commit()
+    sync_appliances_from_telemetry(appliance.uid)
+    refreshed, error_response = get_appliance_or_404(aid)
+    if error_response:
+        return error_response
+    return jsonify(refreshed.to_dict())
 
 
 @app.route("/api/appliance/<aid>/priority", methods=["PATCH"])
@@ -464,6 +631,7 @@ def telemetry_reset():
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
+        ensure_override_columns()
         seed_appliances()
 
     telemetry_store.start()

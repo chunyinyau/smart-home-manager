@@ -124,11 +124,22 @@ def fetch_appliances(uid: str) -> list[dict[str, Any]]:
     return [item for item in payload if isinstance(item, dict)]
 
 
-def shutdown_appliance(aid: str) -> Optional[dict[str, Any]]:
+def power_appliance(
+    aid: str,
+    target_state: str,
+    duration_minutes: Optional[int] = None,
+) -> Optional[dict[str, Any]]:
+    request_payload: dict[str, Any] = {
+        "target_state": target_state,
+    }
+    if duration_minutes is not None:
+        request_payload["duration_minutes"] = duration_minutes
+
     response = request_with_fallback(
         "appliance",
         "POST",
-        f"/api/appliance/{aid}/shutdown",
+        f"/api/appliance/{aid}/power",
+        json_body=request_payload,
     )
     payload = parse_response_json(response)
 
@@ -137,7 +148,7 @@ def shutdown_appliance(aid: str) -> Optional[dict[str, Any]]:
 
     if response.status_code not in {200, 201} or not isinstance(payload, dict):
         raise RuntimeError(
-            extract_error_message(payload, f"appliance-service shutdown returned HTTP {response.status_code}"),
+            extract_error_message(payload, f"appliance-service power returned HTTP {response.status_code}"),
         )
     return payload
 
@@ -159,15 +170,19 @@ def select_targets(
     appliances: list[dict[str, Any]],
     appliance_ids: Optional[list[str]],
     max_shutdowns: int,
+    target_state: str,
 ) -> list[dict[str, Any]]:
-    online = [a for a in appliances if str(a.get("state", "")).upper() == "ON"]
+    if target_state == "OFF":
+        candidates = [a for a in appliances if str(a.get("state", "")).upper() == "ON"]
+    else:
+        candidates = [a for a in appliances if str(a.get("state", "")).upper() == "OFF"]
 
     if appliance_ids:
         wanted = {str(aid) for aid in appliance_ids}
-        return [a for a in online if str(a.get("id")) in wanted]
+        return [a for a in candidates if str(a.get("id")) in wanted]
 
     ranked = sorted(
-        online,
+        candidates,
         key=lambda a: (
             -int(float(a.get("currentWatts", 0) or 0)),
             -int(float(a.get("priority", 0) or 0)),
@@ -198,6 +213,13 @@ def start_automator():
     uid = str(body.get("uid") or DEFAULT_UID)
     target_state = str(body.get("target_state") or "OFF").upper()
     max_shutdowns = to_positive_int(body.get("max_shutdowns"), DEFAULT_MAX_SHUTDOWNS)
+    duration_minutes_raw = body.get("duration_minutes")
+    duration_minutes: Optional[int] = None
+    if duration_minutes_raw is not None:
+        try:
+            duration_minutes = max(1, int(duration_minutes_raw))
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "duration_minutes must be a positive number."}), 400
 
     appliance_ids = body.get("appliance_ids")
     if appliance_ids is not None and not isinstance(appliance_ids, list):
@@ -206,11 +228,11 @@ def start_automator():
     try:
         appliances = fetch_appliances(uid)
 
-        if target_state != "OFF":
+        if target_state not in {"OFF", "ON"}:
             return jsonify(
                 {
                     "success": False,
-                    "error": "Only target_state=OFF is supported in current automator version.",
+                    "error": "target_state must be OFF or ON.",
                 }
             ), 400
 
@@ -218,6 +240,7 @@ def start_automator():
             appliances,
             [str(item) for item in appliance_ids] if isinstance(appliance_ids, list) else None,
             max_shutdowns,
+            target_state,
         )
 
         changed_appliances: list[dict[str, Any]] = []
@@ -225,7 +248,7 @@ def start_automator():
             aid = str(target.get("id") or "")
             if not aid:
                 continue
-            updated = shutdown_appliance(aid)
+            updated = power_appliance(aid, target_state, duration_minutes=duration_minutes)
             if updated:
                 changed_appliances.append(updated)
 
@@ -237,13 +260,22 @@ def start_automator():
                 "uid": uid,
                 "target_state": target_state,
                 "requested_at": iso_utc_now(),
+                "duration_minutes": duration_minutes,
                 "changed_appliances": changed_appliances,
                 "appliance_count": len(changed_appliances),
                 "forecast": forecast,
                 "message": (
-                    "No active appliance was available for shutdown."
+                    (
+                        "No active appliance was available for shutdown."
+                        if target_state == "OFF"
+                        else "No offline appliance was available for power on."
+                    )
                     if len(changed_appliances) == 0
-                    else f"Shut down {len(changed_appliances)} appliance(s)."
+                    else (
+                        f"Shut down {len(changed_appliances)} appliance(s)."
+                        if target_state == "OFF"
+                        else f"Powered on {len(changed_appliances)} appliance(s)."
+                    )
                 ),
             }
         ), 200

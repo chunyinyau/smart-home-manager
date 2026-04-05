@@ -1,8 +1,9 @@
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from threading import Lock
 from typing import Any, Optional
 from urllib.parse import urljoin
+from zoneinfo import ZoneInfo
 
 import requests
 from flask import Flask, jsonify, request
@@ -74,6 +75,7 @@ DEFAULT_INTERVAL_MINUTES = to_positive_float(os.getenv("BILL_INTERVAL_MINUTES"),
 SYNC_BUDGET_EACH_RUN = parse_bool(os.getenv("SYNC_BUDGET_EACH_RUN"), True)
 AUTO_CLOSE_AT_MONTH_END = parse_bool(os.getenv("AUTO_CLOSE_AT_MONTH_END"), False)
 ENABLE_CALCULATEBILL_CRON = parse_bool(os.getenv("ENABLE_CALCULATEBILL_CRON"), False)
+SGT_TZ = ZoneInfo("Asia/Singapore")
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": get_cors_origins()}})
@@ -132,6 +134,10 @@ def extract_error_message(payload: Any, fallback: str) -> str:
 
 def normalize_base_url(base_url: str) -> str:
     return base_url.strip().rstrip("/")
+
+
+def now_sgt() -> datetime:
+    return datetime.now(SGT_TZ)
 
 
 def is_untrusted_host_400(response: requests.Response) -> bool:
@@ -370,7 +376,7 @@ def resolve_budget_cum_bill(user_id: int) -> float:
 
 
 def hydrate_running_total_state(user_id: int = DEFAULT_BILL_USER_ID) -> None:
-    month_key = get_month_key(datetime.now(timezone.utc))
+    month_key = get_month_key(now_sgt())
     running_total = resolve_budget_cum_bill(user_id)
     last_matched_index: Optional[int] = None
     last_accrued_kwh: Optional[float] = None
@@ -420,7 +426,7 @@ def set_running_total(
                 if last_accrued_kwh is not None
                 else current.get("last_accrued_kwh")
             ),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": now_sgt().isoformat(),
         }
 
 
@@ -444,7 +450,7 @@ def update_running_total(
             "month": month_key,
             "running_total": running_total,
             "closed_month": closed_month,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": now_sgt().isoformat(),
         }
         return running_total
 
@@ -466,7 +472,7 @@ def close_month_if_needed(user_id: int, month_key: str, monthly_total: float) ->
 
         current["closed_month"] = month_key
         current["running_total"] = 0.0
-        current["updated_at"] = datetime.now(timezone.utc).isoformat()
+        current["updated_at"] = now_sgt().isoformat()
 
     return {
         "closed": True,
@@ -524,9 +530,9 @@ def execute_billing_cycle(
     Core billing cycle logic, used by both API endpoint and scheduler.
     Returns the result dict (not JSON response).
     """
-    now_utc = datetime.now(timezone.utc)
-    month_key = get_month_key(now_utc)
-    billing_period_start_iso = now_utc.date().replace(day=1).isoformat()
+    now_ts = now_sgt()
+    month_key = get_month_key(now_ts)
+    billing_period_start_iso = now_ts.date().replace(day=1).isoformat()
 
     appliances = fetch_appliances(uid)
     default_period_kwh, total_watts, active_count = calculate_period_kwh(
@@ -583,7 +589,7 @@ def execute_billing_cycle(
         user_id=user_id,
         period_cost_sgd=period_cost_sgd,
         period_kwh=period_kwh,
-        computed_at=now_utc,
+        computed_at=now_ts,
         billing_period_start_iso=billing_period_start_iso,
     )
 
@@ -595,7 +601,7 @@ def execute_billing_cycle(
         "closed": False,
         "reason": "Month close not requested.",
     }
-    should_auto_close = AUTO_CLOSE_AT_MONTH_END and is_last_day_of_month(now_utc)
+    should_auto_close = AUTO_CLOSE_AT_MONTH_END and is_last_day_of_month(now_ts)
     if force_month_close or should_auto_close:
         if not sync_budget:
             budget_update = update_budget_cum_bill(user_id, monthly_total)
@@ -605,7 +611,7 @@ def execute_billing_cycle(
         "user_id": user_id,
         "uid": uid,
         "interval_minutes": interval_minutes,
-        "computed_at": now_utc.isoformat(),
+        "computed_at": now_ts.isoformat(),
         "billing_period_start": billing_period_start_iso,
         "inputs": {
             "active_appliances": active_count,
@@ -676,7 +682,7 @@ def scheduled_calculatebill_job():
     """
     try:
         print(
-            f"[CalculateBill Cron] Running automatic billing cycle at {datetime.now(timezone.utc).isoformat()}",
+            f"[CalculateBill Cron] Running automatic billing cycle at {now_sgt().isoformat()}",
             flush=True,
         )
         result = execute_billing_cycle(

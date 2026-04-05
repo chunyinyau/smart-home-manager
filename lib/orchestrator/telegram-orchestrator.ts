@@ -1,6 +1,9 @@
 import { getAppliances } from "@/lib/services/appliance/appliance.service";
 import { requestChange } from "@/lib/services/request-change/request-change.service";
-import { getForecast } from "@/lib/services/forecast/forecast.service";
+import {
+  getForecast,
+  getForecastRecommendation,
+} from "@/lib/services/forecast/forecast.service";
 import { getHistory } from "@/lib/services/history/history.service";
 import { getUserProfile } from "@/lib/services/profile/profile.service";
 import { getRate } from "@/lib/services/rate/rate.service";
@@ -15,8 +18,95 @@ import type { TelegramIntent } from "@/lib/shared/types";
 interface OrchestratorParams {
   uid?: string;
   aid?: string;
+  durationMinutes?: number;
+  duration_minutes?: number;
   monthlyCap?: number;
   user_id?: number;
+}
+
+function parseDurationMinutes(params: OrchestratorParams): number | undefined {
+  const candidate =
+    typeof params.durationMinutes === "number"
+      ? params.durationMinutes
+      : params.duration_minutes;
+
+  if (typeof candidate !== "number" || !Number.isFinite(candidate)) {
+    return undefined;
+  }
+
+  return Math.max(1, Math.floor(candidate));
+}
+
+function formatTelegramForecastActions(
+  recommendations: Array<{
+    name?: string;
+    suggestedDurationMinutes?: number;
+  }> | undefined,
+): string[] {
+  if (!Array.isArray(recommendations)) {
+    return [];
+  }
+
+  return recommendations
+    .slice(0, 3)
+    .map((item) => {
+      const name = typeof item.name === "string" ? item.name.trim() : "Appliance";
+      const minutes = Number(item.suggestedDurationMinutes ?? 0);
+      if (!Number.isFinite(minutes) || minutes <= 0) {
+        return `OFF ${name}`;
+      }
+      return `OFF ${name} ${Math.round(minutes)}m`;
+    });
+}
+
+type TelegramOffAction = {
+  label: string;
+  command: string;
+  applianceId: string;
+  applianceName: string;
+  durationMinutes: number;
+};
+
+function buildTelegramOffAction(
+  recommendations:
+    | Array<{
+        applianceId?: string;
+        name?: string;
+        suggestedDurationMinutes?: number;
+      }>
+    | undefined,
+  fallbackDurationMinutes?: number,
+): TelegramOffAction | null {
+  if (!Array.isArray(recommendations) || recommendations.length === 0) {
+    return null;
+  }
+
+  const top = recommendations[0];
+  const applianceId = typeof top.applianceId === "string" ? top.applianceId.trim() : "";
+  if (!applianceId) {
+    return null;
+  }
+
+  const applianceName =
+    typeof top.name === "string" && top.name.trim().length > 0
+      ? top.name.trim()
+      : "Appliance";
+
+  const rawDuration = Number(
+    top.suggestedDurationMinutes ?? fallbackDurationMinutes ?? 60,
+  );
+  const durationMinutes =
+    Number.isFinite(rawDuration) && rawDuration > 0
+      ? Math.max(1, Math.round(rawDuration))
+      : 60;
+
+  return {
+    label: `OFF ${applianceName} ${durationMinutes}m`,
+    command: `/off ${applianceId} ${durationMinutes}`,
+    applianceId,
+    applianceName,
+    durationMinutes,
+  };
 }
 
 type BudgetServicePayload = {
@@ -114,7 +204,36 @@ export async function handleTelegramIntent(
   }
 
   if (intent === "forecast") {
-    return getForecast(uid);
+    const [forecast, recommendation] = await Promise.all([
+      getForecast(uid),
+      getForecastRecommendation(uid).catch(() => null),
+    ]);
+
+    const quickActions = formatTelegramForecastActions(
+      recommendation?.recommendations,
+    );
+    const telegramOffAction = buildTelegramOffAction(
+      recommendation?.recommendations,
+      recommendation?.recommendedDurationMinutes,
+    );
+
+    return {
+      ...forecast,
+      quickActions,
+      telegramOffAction,
+      telegramSummary:
+        telegramOffAction
+          ? `Risk ${forecast.riskLevel}. Tap ${telegramOffAction.label} or reply /keep.`
+          : quickActions.length > 0
+            ? `Risk ${forecast.riskLevel}. ${quickActions.join("; ")}.`
+          : `Risk ${forecast.riskLevel}. No action now.`,
+      recommendation: recommendation
+        ? {
+            predictedRiskLevel: recommendation.predictedRiskLevel,
+            recommendedDurationMinutes: recommendation.recommendedDurationMinutes,
+          }
+        : undefined,
+    };
   }
 
   if (intent === "set_budget") {
@@ -130,6 +249,7 @@ export async function handleTelegramIntent(
       uid,
       aid: params.aid,
       targetState: "OFF",
+      durationMinutes: parseDurationMinutes(params),
     });
   }
 

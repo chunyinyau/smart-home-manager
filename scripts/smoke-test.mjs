@@ -83,6 +83,7 @@ const serviceBaseUrls = {
     "SMOKE_UPDATEBUDGET_SERVICE_URL",
     "UPDATEBUDGET_SERVICE_BASE_URL",
     "UPDATEBUDGET_SERVICE_URL",
+  ]),
   requestchange: resolveBaseUrl("http://localhost:5011", [
     "SMOKE_REQUEST_CHANGE_SERVICE_URL",
     "REQUEST_CHANGE_SERVICE_BASE_URL",

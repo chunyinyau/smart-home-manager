@@ -126,7 +126,7 @@ export async function handleTelegramIntent(
   }
 
   if (intent === "shutdown") {
-    return changeApplianceState({
+    return requestChange({
       uid,
       aid: params.aid,
       targetState: "OFF",

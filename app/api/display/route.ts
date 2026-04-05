@@ -15,6 +15,9 @@ export async function GET(request: Request) {
     const response = await fetchService(
       "display",
       `/api/display?uid=${uid}&profile_id=${profile_id}`,
+      {
+        timeoutMs: 12000,
+      },
     );
     const payload = await readJsonBody<Record<string, unknown>>(response);
 

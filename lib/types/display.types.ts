@@ -9,6 +9,13 @@ export interface ApplianceRecord {
   currentWatts: number;
   kwhUsed: number;
   lastSeenAt: string;
+  manualOverride?: {
+    state?: string | null;
+    until?: string | null;
+    reason?: string | null;
+    setAt?: string | null;
+    active?: boolean;
+  };
 }
 
 export interface BudgetData {

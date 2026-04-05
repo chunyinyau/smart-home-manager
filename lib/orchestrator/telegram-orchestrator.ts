@@ -1,5 +1,5 @@
 import { getAppliances } from "@/lib/services/appliance/appliance.service";
-import { changeApplianceState } from "@/lib/services/change-appliance-state/change-appliance-state.service";
+import { requestChange } from "@/lib/services/request-change/request-change.service";
 import { getForecast } from "@/lib/services/forecast/forecast.service";
 import { getHistory, logHistory } from "@/lib/services/history/history.service";
 import { getUserProfile } from "@/lib/services/profile/profile.service";

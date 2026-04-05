@@ -7,7 +7,7 @@ type ServiceKey =
   | "forecastbill"
   | "display"
   | "calculatebill"
-  | "changeappliancestate";
+  | "requestchange";
 
 interface ServiceConfig {
   envVars: string[];
@@ -56,12 +56,12 @@ const SERVICE_CONFIG: Record<ServiceKey, ServiceConfig> = {
     dockerHost: "calculatebill_service",
     port: 5008,
   },
-  changeappliancestate: {
+  requestchange: {
     envVars: [
-      "CHANGE_APPLIANCE_STATE_SERVICE_BASE_URL",
-      "CHANGE_APPLIANCE_STATE_SERVICE_URL",
+      "REQUEST_CHANGE_SERVICE_BASE_URL",
+      "REQUEST_CHANGE_SERVICE_URL",
     ],
-    dockerHost: "change_appliance_state_service",
+    dockerHost: "request_change_service",
     port: 5011,
   },
 };

@@ -45,13 +45,13 @@ services:
       - request_change_service
       - change_state_service
 
-  # 0. RabbitMQ Broker (Ports 5672 and 15672 on host)
+  # 0. RabbitMQ Broker (host ports remapped to avoid local conflicts)
   rabbitmq:
     image: rabbitmq:3.13-management
     restart: always
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "5673:5672"
+      - "15673:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:

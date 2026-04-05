@@ -103,9 +103,15 @@ Optional environment variables:
 - `SMOKE_HISTORY_SERVICE_URL` (default: `http://localhost:5005`)
 - `SMOKE_FORECASTBILL_SERVICE_URL` (default: `http://localhost:5009`)
 - `SMOKE_CALCULATEBILL_SERVICE_URL` (default: `http://localhost:5008`)
+- `SMOKE_PUBLIC_GATEWAY_BASE_URL` (optional: enables checks against Kong/ngrok public routes)
 
 The smoke test now verifies all existing microservices (rate, appliance, bill, budget, history, forecastbill, and calculatebill) through direct service checks, in addition to key Next.js API proxy routes.
 The app-level rate sync check treats `429` and `502` as tolerated warnings because the data.gov.sg upstream can be rate-limited or temporarily unavailable.
+When `SMOKE_PUBLIC_GATEWAY_BASE_URL` is set, the smoke test also checks these public routes:
+
+- `PUT /updatebudget/api/updatebudget/1`
+- `POST /request-change/api/request-change`
+- `POST /change-appliance-state/api/change-appliance-state`
 
 PowerShell example using unique ports:
 
@@ -203,6 +209,63 @@ The app includes the following route handlers:
 - `PUT /api/updatebudget/[user_id]`
 - `POST /api/orchestrator`
 
+## OpenClaw + Telegram via ngrok
+
+If you want OpenClaw Telegram to call the public Kong routes instead of the private Docker service names, configure the exact public endpoint URLs in `.env`:
+
+```bash
+OPENCLAW_UPDATE_BUDGET_URL="https://<your-ngrok-domain>.ngrok-free.app/updatebudget/api/updatebudget/{userId}"
+OPENCLAW_REQUEST_CHANGE_URL="https://<your-ngrok-domain>.ngrok-free.app/request-change/api/request-change"
+# Optional fallback if you want the older public route as well:
+OPENCLAW_CHANGE_APPLIANCE_STATE_URL="https://<your-ngrok-domain>.ngrok-free.app/change-appliance-state/api/change-appliance-state"
+```
+
+Behavior:
+
+- `set_budget` in the Telegram orchestrator uses `OPENCLAW_UPDATE_BUDGET_URL` when set.
+- If the URL contains `{userId}`, the app issues `PUT` to the resolved path such as `/updatebudget/api/updatebudget/1`.
+- If the URL does not contain `{userId}`, the app falls back to `POST` and includes `user_id` in the JSON body.
+- `shutdown` uses `OPENCLAW_REQUEST_CHANGE_URL` first, then `OPENCLAW_CHANGE_APPLIANCE_STATE_URL`, and finally the internal Docker service.
+
+For OpenClaw webhook mode, point Telegram at your ngrok URL and keep the webhook path aligned with OpenClaw's Telegram config. A minimal example looks like:
+
+```json5
+{
+  channels: {
+    telegram: {
+      enabled: true,
+      botToken: "123:abc",
+      dmPolicy: "allowlist",
+      allowFrom: ["123456789"],
+      webhookUrl: "https://<your-ngrok-domain>.ngrok-free.app/telegram-webhook",
+      webhookSecret: "replace-with-a-random-secret",
+      webhookPath: "/telegram-webhook",
+      webhookHost: "127.0.0.1",
+      webhookPort: 8787
+    }
+  }
+}
+```
+
+Typical local flow:
+
+```bash
+# Terminal 1
+openclaw gateway --allow-unconfigured
+
+# Terminal 2
+ngrok http 8787
+
+# Terminal 3
+npm run dev
+```
+
+Then:
+
+1. Set `webhookUrl` to the ngrok HTTPS URL plus `/telegram-webhook`.
+2. Set the `.env` public endpoint variables above so orchestrated budget-change and shutdown actions go through Kong.
+3. Run `npm run smoke:test` with `SMOKE_PUBLIC_GATEWAY_BASE_URL=https://<your-ngrok-domain>.ngrok-free.app` to verify the public routes.
+
 ## CalculateBill Composite Service
 
 The CalculateBill composite service runs as a Flask container on port `5008` and orchestrates:
@@ -268,7 +331,7 @@ Endpoints exposed by the composite service:
 - Queue name defaults to `history.events.v1`.
 - Configure broker via `RABBITMQ_URL` (single URL) or `RABBITMQ_URLS` (comma-separated fallback URLs).
 - Optional queue override: `HISTORY_EVENTS_QUEUE`.
-- Docker compose starts RabbitMQ with management UI on `http://localhost:15672`.
+- Docker compose starts RabbitMQ with management UI on `http://localhost:15673`.
 
 ## Notes
 

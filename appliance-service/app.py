@@ -18,7 +18,6 @@ DEFAULT_TELEMETRY_CSV = Path("/app/data/appliance_energy_data.csv")
 DEFAULT_TELEMETRY_STATE_FILE = Path("/app/data/appliance_telemetry_state.json")
 SGT_TZ = ZoneInfo("Asia/Singapore")
 
-
 def get_cors_origins():
     configured = [
         origin.strip()
@@ -337,6 +336,7 @@ def sync_appliances_from_telemetry(uid: str) -> None:
             kwh_used = round(float(per_device_accrued.get(profile["watts_key"], 0.0)), 4)
         except (TypeError, ValueError):
             kwh_used = 0.0
+
         state = "ON" if watts > 0 else "OFF"
 
         appliance = existing.get(profile["id"])
@@ -428,6 +428,7 @@ def home():
                 "/api/appliance",
                 "/api/appliance/<aid>",
                 "/api/appliance/<aid>/shutdown",
+                "/api/appliance/<aid>/state",
                 "/api/appliance/<aid>/power",
                 "/api/appliance/<aid>/priority",
             ],
@@ -480,6 +481,27 @@ def shutdown_appliance(aid: str):
     appliance.last_seen_at = current_timestamp()
     db.session.commit()
     return jsonify(appliance.to_dict())
+
+@app.route("/api/appliance/<aid>/state", methods=["PATCH"])
+def update_state(aid: str):
+    appliance, error_response = get_appliance_or_404(aid)
+    if error_response:
+        return error_response
+
+    payload = request.get_json(silent=True) or {}
+    target_state = str(payload.get("state") or "OFF").upper()
+
+    if target_state not in {"ON", "OFF"}:
+        return jsonify({"error": "state must be ON or OFF."}), 400
+
+    duration_minutes = payload.get("duration_minutes")
+    if duration_minutes is not None:
+        try:
+            duration_minutes = max(1, int(duration_minutes))
+        except (TypeError, ValueError):
+            return jsonify({"error": "duration_minutes must be a positive number."}), 400
+
+    return jsonify(power_appliance(aid, target_state, duration_minutes=duration_minutes))
 
 
 @app.route("/api/appliance/<aid>/power", methods=["POST"])

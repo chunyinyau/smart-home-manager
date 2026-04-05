@@ -95,6 +95,46 @@ Optional environment variables:
 The smoke test now verifies all existing microservices (rate, appliance, bill, budget, history, forecastbill, and calculatebill) through direct service checks, in addition to key Next.js API proxy routes.
 The app-level rate sync check treats `429` and `502` as tolerated warnings because the data.gov.sg upstream can be rate-limited or temporarily unavailable.
 
+## Kong Gateway
+
+The repo now includes a Kong gateway in DB-less mode so external clients such as OpenClaw can call a single base URL instead of talking to each microservice directly.
+
+Start the stack:
+
+```bash
+docker compose up --build -d
+```
+
+Kong proxy:
+
+```text
+http://localhost:8000
+```
+
+Useful gateway routes:
+
+- `GET /forecast/api/forecast?uid=user_demo_001`
+- `GET /display/api/display?uid=user_demo_001&profile_id=1`
+- `GET /budget/api/budget/1`
+- `GET /appliance/api/appliance?uid=user_demo_001`
+- `POST /calculatebill/api/calculatebill/run`
+- `POST /change-appliance-state/api/change-appliance-state`
+- `POST /state-change-automator/api/state-change-automator/shutdown`
+
+Example:
+
+```bash
+curl "http://localhost:8000/forecast/api/forecast?uid=user_demo_001"
+```
+
+To expose this to an EC2-hosted OpenClaw instance quickly, tunnel Kong rather than each individual service. For example, with ngrok:
+
+```bash
+ngrok http 8000
+```
+
+Then point OpenClaw at the generated HTTPS base URL and keep the route prefixes above unchanged.
+
 ## API Routes
 
 The app includes the following route handlers:

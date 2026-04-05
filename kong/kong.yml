@@ -1,0 +1,83 @@
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: rate-service
+    url: http://rate_service:5007
+    routes:
+      - name: rate-root
+        paths:
+          - /rate
+        strip_path: true
+
+  - name: appliance-service
+    url: http://appliance_service:5002
+    routes:
+      - name: appliance-root
+        paths:
+          - /appliance
+        strip_path: true
+
+  - name: bill-service
+    url: http://bill_service:5003
+    routes:
+      - name: bill-root
+        paths:
+          - /bills
+        strip_path: true
+
+  - name: budget-service
+    url: http://budget_service:5004
+    routes:
+      - name: budget-root
+        paths:
+          - /budget
+        strip_path: true
+
+  - name: history-service
+    url: http://history_service:5005
+    routes:
+      - name: history-root
+        paths:
+          - /history
+        strip_path: true
+
+  - name: display-service
+    url: http://display_service:5006
+    routes:
+      - name: display-root
+        paths:
+          - /display
+        strip_path: true
+
+  - name: calculatebill-service
+    url: http://calculatebill_service:5008
+    routes:
+      - name: calculatebill-root
+        paths:
+          - /calculatebill
+        strip_path: true
+
+  - name: forecastbill-service
+    url: http://forecastbill_service:5009
+    routes:
+      - name: forecast-root
+        paths:
+          - /forecast
+        strip_path: true
+
+  - name: state-change-automator-service
+    url: http://state_change_automator_service:5010
+    routes:
+      - name: state-change-automator-root
+        paths:
+          - /state-change-automator
+        strip_path: true
+
+  - name: change-appliance-state-service
+    url: http://change_appliance_state_service:5011
+    routes:
+      - name: change-appliance-state-root
+        paths:
+          - /change-appliance-state
+        strip_path: true

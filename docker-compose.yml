@@ -1,4 +1,32 @@
 services:
+  kong:
+    image: kong:3.8
+    restart: always
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /usr/local/kong/declarative/kong.yml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    volumes:
+      - ./kong/kong.yml:/usr/local/kong/declarative/kong.yml:ro
+    depends_on:
+      - rate_service
+      - appliance_service
+      - bill_service
+      - budget_service
+      - history_service
+      - display_service
+      - calculatebill_service
+      - forecastbill_service
+      - change_appliance_state_service
+      - state_change_automator_service
+
   # 0. RabbitMQ Broker (Ports 5672 and 15672 on host)
   rabbitmq:
     image: rabbitmq:3.13-management

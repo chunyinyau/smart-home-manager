@@ -53,8 +53,8 @@ export async function requestChange(params: {
   );
 
   if (!response.ok) {
-    throw new Error(await readChangeApplianceStateError(response));
+    throw new Error(await readRequestChangeError(response));
   }
 
-  return (await response.json()) as ChangeApplianceStateResult;
+  return (await response.json()) as RequestChangeResult;
 }

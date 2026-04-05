@@ -1,3 +1,21 @@
+x-healthcheck-http: &healthcheck-http
+  interval: 15s
+  timeout: 5s
+  retries: 8
+  start_period: 25s
+
+x-healthcheck-mysql: &healthcheck-mysql
+  interval: 10s
+  timeout: 5s
+  retries: 10
+  start_period: 30s
+
+x-healthcheck-rabbitmq: &healthcheck-rabbitmq
+  interval: 10s
+  timeout: 5s
+  retries: 10
+  start_period: 20s
+
 services:
   kong:
     image: kong:3.8
@@ -36,6 +54,9 @@ services:
       - "15672:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      <<: *healthcheck-rabbitmq
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
 
   # 1. Rate Database Component (Port 33061 on host)
   rate_db:
@@ -48,6 +69,9 @@ services:
       - "33061:3306"
     volumes:
       - rate_db_data:/var/lib/mysql
+    healthcheck:
+      <<: *healthcheck-mysql
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
 
   # 2. Rate API Component (Port 5007 on host)
   rate_service:
@@ -58,7 +82,11 @@ services:
     environment:
       - DATABASE_URL=mysql+pymysql://root:rate_root_password@rate_db:3306/rate_db
     depends_on:
-      - rate_db
+      rate_db:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-http
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5007/', timeout=3)"]
 
   # 3. Bill Database Component (Port 33062 on host)
   bill_db:
@@ -71,6 +99,9 @@ services:
       - "33062:3306"
     volumes:
       - bill_db_data:/var/lib/mysql
+    healthcheck:
+      <<: *healthcheck-mysql
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
 
   # 4. Bill API Component (Port 5003 on host)
   bill_service:
@@ -81,7 +112,11 @@ services:
     environment:
       - DATABASE_URL=mysql+pymysql://root:bill_root_password@bill_db:3306/bill_db
     depends_on:
-      - bill_db
+      bill_db:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-http
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5003/', timeout=3)"]
 
   # 5. Budget Database Component (Port 33063 on host)
   budget_db:
@@ -94,6 +129,9 @@ services:
       - "33063:3306"
     volumes:
       - budget_db_data:/var/lib/mysql
+    healthcheck:
+      <<: *healthcheck-mysql
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
 
   # 6. Budget API Component (Port 5004 on host)
   budget_service:
@@ -104,7 +142,11 @@ services:
     environment:
       - DATABASE_URL=mysql+pymysql://root:budget_root_password@budget_db:3306/budget_db
     depends_on:
-      - budget_db
+      budget_db:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-http
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5004/', timeout=3)"]
   # 5. Appliance Database Component (Port 33063 on host)
   appliance_db:
     image: mysql:8.0
@@ -116,6 +158,9 @@ services:
       - "33064:3306"
     volumes:
       - appliance_db_data:/var/lib/mysql
+    healthcheck:
+      <<: *healthcheck-mysql
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
 
   # 6. Appliance API Component (Port 5002 on host)
   appliance_service:
@@ -129,10 +174,14 @@ services:
       - APPLIANCE_TELEMETRY_STATE_FILE=/app/data/appliance_telemetry_state.json
       - APPLIANCE_REPLAY_INTERVAL_SECONDS=300
     depends_on:
-      - appliance_db
+      appliance_db:
+        condition: service_healthy
     volumes:
       - ./appliance-service/seed:/app/seed:ro
       - ./appliance-service/data:/app/data
+    healthcheck:
+      <<: *healthcheck-http
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5002/', timeout=3)"]
 
   # 7. History Database Component (Port 33065 on host)
   history_db:
@@ -145,6 +194,9 @@ services:
       - "33065:3306"
     volumes:
       - history_db_data:/var/lib/mysql
+    healthcheck:
+      <<: *healthcheck-mysql
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
 
   # 8. History API Component (Port 5005 on host)
   history_service:
@@ -159,8 +211,13 @@ services:
       - RABBITMQ_URLS=amqp://guest:guest@rabbitmq:5672
       - HISTORY_EVENTS_QUEUE=history.events.v1
     depends_on:
-      - history_db
-      - rabbitmq
+      history_db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-http
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5005/', timeout=3)"]
 
   # 11. Display Composite Service (Port 5006 on host) — no DB
   display_service:
@@ -177,10 +234,19 @@ services:
       - PROFILE_SERVICE_URL=https://personal-2nbikeej.outsystemscloud.com/Profile/rest/Profile/profile
       - REQUEST_TIMEOUT_SECONDS=8
     depends_on:
-      - budget_service
-      - history_service
-      - bill_service
-      - appliance_service
+      budget_service:
+        condition: service_healthy
+      history_service:
+        condition: service_healthy
+      bill_service:
+        condition: service_healthy
+      appliance_service:
+        condition: service_healthy
+      forecastbill_service:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-http
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5006/health', timeout=3)"]
 
   # 12. CalculateBill Composite Service (Port 5008 on host) - no DB
   calculatebill_service:
@@ -201,10 +267,17 @@ services:
       - AUTO_CLOSE_AT_MONTH_END=false
       - ENABLE_CALCULATEBILL_CRON=true
     depends_on:
-      - appliance_service
-      - rate_service
-      - bill_service
-      - budget_service
+      appliance_service:
+        condition: service_healthy
+      rate_service:
+        condition: service_healthy
+      bill_service:
+        condition: service_healthy
+      budget_service:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-http
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5008/', timeout=3)"]
 
   # 13. ForecastBill Composite Service (Port 5009 on host) - no DB
   forecastbill_service:
@@ -224,8 +297,13 @@ services:
       - PICOCLAW_API_KEY=${PICOCLAW_API_KEY:-}
       - PICOCLAW_MODEL=${PICOCLAW_MODEL:-gpt-5.4-mini}
     depends_on:
-      - bill_service
-      - budget_service
+      bill_service:
+        condition: service_healthy
+      budget_service:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-http
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5009/', timeout=3)"]
 
   # 14. UpdateBudget Composite Service (Port 5012 on host) - no DB
   updatebudget_service:
@@ -242,9 +320,15 @@ services:
       - DEFAULT_UID=user_demo_001
       - DEFAULT_BUDGET_USER_ID=1
     depends_on:
-      - forecastbill_service
-      - budget_service
-      - rabbitmq
+      forecastbill_service:
+        condition: service_healthy
+      budget_service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-http
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5012/', timeout=3)"]
 
   # 15. Request Change Composite Service (Port 5011 on host) - no DB
   request_change_service:
@@ -258,7 +342,13 @@ services:
       - REQUEST_TIMEOUT_SECONDS=8
       - DEFAULT_UID=user_demo_001
     depends_on:
-      - history_service
+      history_service:
+        condition: service_healthy
+      change_state_service:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-http
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5011/', timeout=3)"]
 
   # 16. Change State Service (Port 5010 on host) - no DB
   change_state_service:
@@ -273,8 +363,13 @@ services:
       - DEFAULT_UID=user_demo_001
       - DEFAULT_MAX_SHUTDOWNS=1
     depends_on:
-      - appliance_service
-      - forecastbill_service
+      appliance_service:
+        condition: service_healthy
+      forecastbill_service:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-http
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5010/', timeout=3)"]
 
 volumes:
   rabbitmq_data:

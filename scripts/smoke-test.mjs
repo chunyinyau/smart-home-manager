@@ -94,6 +94,10 @@ const serviceBaseUrls = {
     "CHANGE_STATE_SERVICE_BASE_URL",
     "CHANGE_STATE_SERVICE_URL",
   ]),
+  kong: resolveBaseUrl("http://localhost:8000", [
+    "SMOKE_KONG_BASE_URL",
+    "KONG_BASE_URL",
+  ]),
 };
 
 const checks = [
@@ -229,6 +233,24 @@ const checks = [
     path: "/",
     baseUrl: serviceBaseUrls.changestate,
     label: "change-state-service",
+    expectedStatuses: [200],
+    toleratedStatuses: [],
+  },
+  {
+    name: "Kong UpdateBudget Root",
+    method: "GET",
+    path: "/updatebudget",
+    baseUrl: serviceBaseUrls.kong,
+    label: "kong-gateway",
+    expectedStatuses: [200],
+    toleratedStatuses: [],
+  },
+  {
+    name: "Kong Request Change Root",
+    method: "GET",
+    path: "/request-change",
+    baseUrl: serviceBaseUrls.kong,
+    label: "kong-gateway",
     expectedStatuses: [200],
     toleratedStatuses: [],
   },

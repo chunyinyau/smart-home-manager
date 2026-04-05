@@ -81,3 +81,16 @@ services:
         paths:
           - /change-appliance-state
         strip_path: true
+
+      - name: request-change-short-root
+        paths:
+          - /request-change
+        strip_path: true
+
+  - name: updatebudget-service
+    url: http://updatebudget_service:5012
+    routes:
+      - name: updatebudget-root
+        paths:
+          - /updatebudget
+        strip_path: true

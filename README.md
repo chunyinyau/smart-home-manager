@@ -63,12 +63,21 @@ docker compose up --build -d
 http://localhost:3000
 ```
 
+1. If you want a public tunnel for Kong, start ngrok after Docker is up:
+
+```bash
+npm run tunnel
+```
+
+By default this tunnels port `8000`, which is the Kong gateway exposed by `docker-compose.yml`.
+
 ## Scripts
 
 - `npm run dev` - start the local development server
 - `npm run build` - build the production app
 - `npm run start` - run the production build
 - `npm run lint` - run ESLint
+- `npm run tunnel` - open an ngrok tunnel to Kong on port `8000`
 - `npm run smoke:test` - run API smoke checks for Next routes and all microservices
 
 ## Smoke Test
@@ -118,6 +127,9 @@ Useful gateway routes:
 - `GET /display/api/display?uid=user_demo_001&profile_id=1`
 - `GET /budget/api/budget/1`
 - `GET /appliance/api/appliance?uid=user_demo_001`
+- `PUT /updatebudget/api/updatebudget/1`
+- `POST /updatebudget/api/updatebudget`
+- `POST /request-change/api/request-change`
 - `POST /calculatebill/api/calculatebill/run`
 - `POST /change-appliance-state/api/change-appliance-state`
 - `POST /state-change-automator/api/state-change-automator/shutdown`
@@ -128,13 +140,39 @@ Example:
 curl "http://localhost:8000/forecast/api/forecast?uid=user_demo_001"
 ```
 
+Examples for the newly exposed composite services:
+
+```bash
+curl -X PUT "http://localhost:8000/updatebudget/api/updatebudget/1" \
+  -H "Content-Type: application/json" \
+  -d '{"budget_cap": 250}'
+```
+
+```bash
+curl -X POST "http://localhost:8000/request-change/api/request-change" \
+  -H "Content-Type: application/json" \
+  -d '{"uid":"user_demo_001","target_state":"OFF"}'
+```
+
 To expose this to an EC2-hosted OpenClaw instance quickly, tunnel Kong rather than each individual service. For example, with ngrok:
+
+```bash
+npm run tunnel
+```
+
+Then point OpenClaw at the generated HTTPS base URL and keep the route prefixes above unchanged.
+
+If ngrok has not been initialized on your machine yet, run:
+
+```bash
+ngrok config add-authtoken <your-token>
+```
+
+If you prefer calling ngrok directly, the equivalent command is:
 
 ```bash
 ngrok http 8000
 ```
-
-Then point OpenClaw at the generated HTTPS base URL and keep the route prefixes above unchanged.
 
 ## API Routes
 

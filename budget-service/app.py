@@ -35,7 +35,7 @@ app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": get_cors_origins()}})
 
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
-    'DATABASE_URL', 'sqlite:///local_budget.db'
+    'DATABASE_URL', 'mysql+pymysql://root:budget_root_password@budget_db:3306/budget_db'
 )
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 

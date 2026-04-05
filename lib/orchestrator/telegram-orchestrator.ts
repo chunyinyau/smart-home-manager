@@ -5,6 +5,7 @@ import {
   getForecastRecommendation,
 } from "@/lib/services/forecast/forecast.service";
 import { getHistory } from "@/lib/services/history/history.service";
+import { logHistory } from "@/lib/services/history/history.service";
 import { getUserProfile } from "@/lib/services/profile/profile.service";
 import { getRate } from "@/lib/services/rate/rate.service";
 import {
@@ -231,7 +232,7 @@ async function syncLatestBilling(userId: number, uid: string) {
     }),
     timeoutMs: 12000,
   });
-  const payload = await readJsonBody<CalculateBillPayload>(response);
+  const payload = await readJsonBody<UpdateBudgetPayload>(response);
 
   if (!response.ok || payload?.success === false) {
     throw new Error(

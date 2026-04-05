@@ -675,17 +675,6 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            {/* Live Electricity Rate Indicator */}
-            <div className="flex items-center gap-2 border border-emerald-200 bg-emerald-50 px-3 py-1.5 rounded-md shadow-sm">
-              <Zap size={15} className="text-emerald-600" />
-              <div className="flex flex-col">
-                <span className="text-[10px] font-bold uppercase text-emerald-600 leading-none">Live SP Tariff</span>
-                <span className="text-sm font-semibold text-emerald-700 leading-none mt-0.5">
-                  {currentRate ? `${currentRate}¢ / kWh` : 'Loading...'}
-                </span>
-              </div>
-            </div>
-
             <a 
               href="#recent-activities"
               className="flex items-center gap-2 text-sm font-medium text-gray-600 border border-gray-200 px-3 py-1.5 rounded-md hover:bg-gray-50 transition-colors"

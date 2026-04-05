@@ -288,6 +288,7 @@ def publish_budget_update_event(
     requested_budget_cap: float,
     projected_monthly_spend: float,
 ) -> Optional[dict[str, Any]]:
+    # UpdateBudget logs via RabbitMQ only; History service consumes this queue.
     event_name = "BudgetUpdateAccepted" if accepted else "BudgetUpdateRejected"
     occurred_at = iso_utc_now()
     body = json.dumps(
@@ -320,6 +321,7 @@ def publish_budget_update_event(
 
     return {
         "published": True,
+        "transport": "rabbitmq",
         "event": event_name,
         "queue": HISTORY_EVENTS_QUEUE,
         "occurred_at": occurred_at,

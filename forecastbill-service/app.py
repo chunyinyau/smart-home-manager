@@ -506,16 +506,11 @@ def fetch_user_bill_history(user_id: int) -> list[dict[str, Any]]:
 
 
 def resolve_current_period_start(
-    history: list[dict[str, Any]],
+    _history: list[dict[str, Any]],
     now_utc: datetime,
 ) -> date:
-    dates = [
-        item.get("billingPeriodStartDate")
-        for item in history
-        if isinstance(item.get("billingPeriodStartDate"), date)
-    ]
-    if dates:
-        return max(dates)
+    # Forecast input is intentionally constrained to current-month billing records.
+    # This keeps regression output aligned with the resident's active billing cycle.
     return date(now_utc.year, now_utc.month, 1)
 
 
@@ -624,7 +619,7 @@ def normalize_ai_assessment(payload: Any, fallback: dict[str, Any]) -> dict[str,
     return normalized
 
 
-def resolve_picoclaw_api_key() -> str:
+def resolve_picoclaw_api_key() -> str | None:
     api_key = os.getenv("PICOCLAW_API_KEY")
     if api_key:
         return api_key
@@ -699,27 +694,12 @@ def build_forecast(uid: str, user_id: int, profile_id: str) -> dict[str, Any]:
         round(current_average_daily_kwh * days_in_month, 2),
     )
 
-    appliance_snapshot = fetch_appliance_snapshot(uid)
-    implied_price_per_kwh = (
-        (projected_month_end_spend / projected_month_end_kwh)
-        if projected_month_end_kwh > 0
-        else 0.0
-    )
-    override_adjustment = estimate_active_override_savings(
-        appliance_snapshot,
-        now_utc,
-        current_period_start,
-        implied_price_per_kwh,
-    )
-
-    projected_month_end_spend = round(
-        max(projected_month_end_spend - float(override_adjustment["estimatedSavedSgd"]), current_period_total_cost),
-        2,
-    )
-    projected_month_end_kwh = round(
-        max(projected_month_end_kwh - float(override_adjustment["estimatedSavedKwh"]), current_period_total_kwh),
-        2,
-    )
+    # ForecastBill composes context; linear-regression prediction is owned by picoclaw/forecast.py.
+    override_adjustment = {
+        "estimatedSavedKwh": 0.0,
+        "estimatedSavedSgd": 0.0,
+        "activeOverrides": [],
+    }
 
     suggested_days_to_exceed = calculate_days_to_exceed(
         budget_cap,
@@ -783,33 +763,24 @@ def build_forecast(uid: str, user_id: int, profile_id: str) -> dict[str, Any]:
     ai_projected_cost = round(float(assessment["projectedCost"]), 2)
     ai_projected_kwh = round(float(assessment["projectedKwh"]), 2)
 
-    adjusted_projected_cost = round(
-        max(ai_projected_cost - float(override_adjustment["estimatedSavedSgd"]), current_period_total_cost),
-        2,
-    )
-    adjusted_projected_kwh = round(
-        max(ai_projected_kwh - float(override_adjustment["estimatedSavedKwh"]), current_period_total_kwh),
-        2,
-    )
+    risk_level = str(assessment.get("riskLevel") or "").upper()
+    if risk_level not in {"SAFE", "HIGH", "CRITICAL"}:
+        risk_level = derive_risk_level(ai_projected_cost, budget_cap)
 
-    adjusted_risk_level = derive_risk_level(adjusted_projected_cost, budget_cap)
     narrative = str(assessment.get("shortNarrative") or "").strip()
-    if float(override_adjustment["estimatedSavedSgd"]) > 0:
-        narrative = (
-            f"{narrative} Active manual overrides reduce projected spend by approximately "
-            f"${float(override_adjustment['estimatedSavedSgd']):.2f}."
-        ).strip()
+    if not narrative:
+        narrative = fallback_short_narrative(risk_level, ai_projected_cost, budget_cap)
 
-    days_to_exceed_adjusted = calculate_days_to_exceed(
-        budget_cap,
-        current_period_total_cost,
-        max((adjusted_projected_cost - current_period_total_cost) / max(days_remaining, 1), 0.0),
-    )
+    days_to_exceed = assessment.get("daysToExceed")
+    if days_to_exceed is None:
+        normalized_days_to_exceed = None
+    else:
+        normalized_days_to_exceed = parse_non_negative_int(days_to_exceed)
 
     effective_price_per_kwh = round(
-        adjusted_projected_cost / adjusted_projected_kwh,
+        ai_projected_cost / ai_projected_kwh,
         6,
-    ) if adjusted_projected_kwh > 0 else 0.0
+    ) if ai_projected_kwh > 0 else 0.0
 
     return {
         "uid": uid,
@@ -817,11 +788,11 @@ def build_forecast(uid: str, user_id: int, profile_id: str) -> dict[str, Any]:
         "month": current_month,
         "billingPeriodStart": current_period_start.isoformat(),
         "generatedAt": iso_sgt_now(),
-        "projectedKwh": adjusted_projected_kwh,
-        "projectedCost": adjusted_projected_cost,
+        "projectedKwh": ai_projected_kwh,
+        "projectedCost": ai_projected_cost,
         "reasoning": narrative,
-        "riskLevel": adjusted_risk_level,
-        "daysToExceed": days_to_exceed_adjusted,
+        "riskLevel": risk_level,
+        "daysToExceed": normalized_days_to_exceed,
         "shortNarrative": narrative,
         "recommendedAppliances": assessment["recommendedAppliances"],
         "recommendations": assessment["recommendedAppliances"],

@@ -418,12 +418,12 @@ def _build_deterministic_assessment(input_payload: dict[str, Any]) -> dict[str, 
     return assessment
 
 
-def _resolve_api_key() -> str:
+def _resolve_api_key() -> str | None:
     api_key = os.getenv("PICOCLAW_API_KEY")
     if api_key:
         return api_key
 
-    return None, None
+    return None
 
 
 def _extract_output_text(payload: dict[str, Any]) -> str | None:

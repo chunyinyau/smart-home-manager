@@ -587,6 +587,8 @@ async function runUpdateBudgetWorkflowCheck() {
       acceptedResult.parsedBody?.accepted !== true
       || acceptedResult.parsedBody?.action !== "budget_update_accepted"
       || acceptedResult.parsedBody?.history?.event !== "BudgetUpdateAccepted"
+      || acceptedResult.parsedBody?.history?.transport !== "rabbitmq"
+      || typeof acceptedResult.parsedBody?.history?.queue !== "string"
     ) {
       return fail(
         `Accepted response shape mismatch: ${toOneLine(acceptedResult.parsedBody)}`,
@@ -630,6 +632,8 @@ async function runUpdateBudgetWorkflowCheck() {
       rejectedResult.parsedBody?.accepted !== false
       || rejectedResult.parsedBody?.action !== "budget_update_rejected"
       || rejectedResult.parsedBody?.history?.event !== "BudgetUpdateRejected"
+      || rejectedResult.parsedBody?.history?.transport !== "rabbitmq"
+      || typeof rejectedResult.parsedBody?.history?.queue !== "string"
     ) {
       return fail(
         `Rejected response shape mismatch: ${toOneLine(rejectedResult.parsedBody)}`,

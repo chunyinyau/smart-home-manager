@@ -247,7 +247,7 @@ export default function App() {
     setAutomatingState(true);
     setAutomationFeedback(null);
     try {
-      const response = await fetch('/api/change-appliance-state', {
+      const response = await fetch('/api/request-change', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ uid: DEMO_UID, targetState: 'OFF' }),
@@ -270,7 +270,7 @@ export default function App() {
     const targetState = currentState.toUpperCase() === 'ON' ? 'OFF' : 'ON';
     setTogglingApplianceId(aid);
     try {
-      const response = await fetch('/api/change-appliance-state', {
+      const response = await fetch('/api/request-change', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

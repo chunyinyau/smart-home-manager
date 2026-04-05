@@ -12,6 +12,7 @@ Wattch is a smart home energy management demo built with Next.js. It shows how a
 - Runs rate, appliance, budget, bill, and history as Dockerized Python microservices.
 - Runs calculatebill as a composite Flask microservice on port 5008.
 - Runs forecastbill as a composite Flask microservice on port 5009.
+- Runs updatebudget as a composite Flask microservice on port 5012.
 - Uses RabbitMQ for asynchronous history log ingestion.
 
 ## Tech Stack
@@ -62,12 +63,21 @@ docker compose up --build -d
 http://localhost:3000
 ```
 
+1. If you want a public tunnel for Kong, start ngrok after Docker is up:
+
+```bash
+npm run tunnel
+```
+
+By default this tunnels port `8000`, which is the Kong gateway exposed by `docker-compose.yml`.
+
 ## Scripts
 
 - `npm run dev` - start the local development server
 - `npm run build` - build the production app
 - `npm run start` - run the production build
 - `npm run lint` - run ESLint
+- `npm run tunnel` - open an ngrok tunnel to Kong on port `8000`
 - `npm run smoke:test` - run API smoke checks for Next routes and all microservices
 
 ## Smoke Test
@@ -101,6 +111,75 @@ When `SMOKE_PUBLIC_GATEWAY_BASE_URL` is set, the smoke test also checks these pu
 - `POST /request-change/api/request-change`
 - `POST /change-appliance-state/api/change-appliance-state`
 
+## Kong Gateway
+
+The repo now includes a Kong gateway in DB-less mode so external clients such as OpenClaw can call a single base URL instead of talking to each microservice directly.
+
+Start the stack:
+
+```bash
+docker compose up --build -d
+```
+
+Kong proxy:
+
+```text
+http://localhost:8000
+```
+
+Useful gateway routes:
+
+- `GET /forecast/api/forecast?uid=user_demo_001`
+- `GET /display/api/display?uid=user_demo_001&profile_id=1`
+- `GET /budget/api/budget/1`
+- `GET /appliance/api/appliance?uid=user_demo_001`
+- `PUT /updatebudget/api/updatebudget/1`
+- `POST /updatebudget/api/updatebudget`
+- `POST /request-change/api/request-change`
+- `POST /calculatebill/api/calculatebill/run`
+- `POST /change-appliance-state/api/change-appliance-state`
+- `POST /state-change-automator/api/state-change-automator/shutdown`
+
+Example:
+
+```bash
+curl "http://localhost:8000/forecast/api/forecast?uid=user_demo_001"
+```
+
+Examples for the newly exposed composite services:
+
+```bash
+curl -X PUT "http://localhost:8000/updatebudget/api/updatebudget/1" \
+  -H "Content-Type: application/json" \
+  -d '{"budget_cap": 250}'
+```
+
+```bash
+curl -X POST "http://localhost:8000/request-change/api/request-change" \
+  -H "Content-Type: application/json" \
+  -d '{"uid":"user_demo_001","target_state":"OFF"}'
+```
+
+To expose this to an EC2-hosted OpenClaw instance quickly, tunnel Kong rather than each individual service. For example, with ngrok:
+
+```bash
+npm run tunnel
+```
+
+Then point OpenClaw at the generated HTTPS base URL and keep the route prefixes above unchanged.
+
+If ngrok has not been initialized on your machine yet, run:
+
+```bash
+ngrok config add-authtoken <your-token>
+```
+
+If you prefer calling ngrok directly, the equivalent command is:
+
+```bash
+ngrok http 8000
+```
+
 ## API Routes
 
 The app includes the following route handlers:
@@ -119,6 +198,7 @@ The app includes the following route handlers:
 - `GET /api/profile`
 - `GET /api/rate`
 - `GET /api/forecast`
+- `PUT /api/updatebudget/[user_id]`
 - `POST /api/orchestrator`
 
 ## OpenClaw + Telegram via ngrok
@@ -220,6 +300,23 @@ Endpoints exposed by the composite service:
 - `POST /api/forecastbill` - alias for `POST /api/forecast`
 
 Forecast response includes `projectedCost`, `projectedKwh`, `riskLevel`, `daysToExceed`, `shortNarrative`, and `recommendedAppliances`.
+
+## UpdateBudget Composite Service
+
+The UpdateBudget composite service runs as a Flask container on port `5012` and orchestrates:
+
+- `forecastbill-service` to generate projected month-end spend
+- `budget-service` to apply cap updates only when request is accepted
+- direct RabbitMQ publish of `BudgetUpdateAccepted` / `BudgetUpdateRejected` events
+
+CalculateBill runs on its own cron schedule, so UpdateBudget evaluates budget requests using the latest persisted billing state instead of triggering CalculateBill on-demand.
+
+The `history-service` consumes those queue events and appends immutable logs.
+
+Endpoints exposed by the composite service:
+
+- `PUT /api/updatebudget/<user_id>` - canonical endpoint for Telegram/UI initiated budget updates
+- `POST /api/updatebudget` - convenience endpoint when user_id is provided in body
 
 ## RabbitMQ (History Events)
 

@@ -1,7 +1,7 @@
 import { getAppliances } from "@/lib/services/appliance/appliance.service";
-import { changeApplianceState } from "@/lib/services/change-appliance-state/change-appliance-state.service";
+import { requestChange } from "@/lib/services/request-change/request-change.service";
 import { getForecast } from "@/lib/services/forecast/forecast.service";
-import { getHistory, logHistory } from "@/lib/services/history/history.service";
+import { getHistory } from "@/lib/services/history/history.service";
 import { getUserProfile } from "@/lib/services/profile/profile.service";
 import { getRate } from "@/lib/services/rate/rate.service";
 import {
@@ -31,9 +31,18 @@ type BudgetServicePayload = {
   };
 };
 
-type CalculateBillPayload = {
+type UpdateBudgetPayload = {
   success?: boolean;
+  accepted?: boolean;
+  action?: string;
+  message?: string;
   error?: string;
+  requestedMonthlyCap?: number;
+  projectedMonthlySpend?: number;
+  forecast?: Record<string, unknown>;
+  billingSync?: Record<string, unknown>;
+  budget?: Record<string, unknown>;
+  history?: Record<string, unknown>;
   data?: Record<string, unknown>;
 };
 
@@ -215,7 +224,7 @@ export async function handleTelegramIntent(
   }
 
   if (intent === "shutdown") {
-    return changeApplianceState({
+    return requestChange({
       uid,
       aid: params.aid,
       targetState: "OFF",

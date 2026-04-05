@@ -124,11 +124,12 @@ def fetch_appliances(uid: str) -> list[dict[str, Any]]:
     return [item for item in payload if isinstance(item, dict)]
 
 
-def shutdown_appliance(aid: str) -> Optional[dict[str, Any]]:
+def change_appliance_state(aid: str, target_state: str) -> Optional[dict[str, Any]]:
     response = request_with_fallback(
         "appliance",
-        "POST",
-        f"/api/appliance/{aid}/shutdown",
+        "PATCH",
+        f"/api/appliance/{aid}/state",
+        json_body={"state": target_state}
     )
     payload = parse_response_json(response)
 
@@ -137,7 +138,7 @@ def shutdown_appliance(aid: str) -> Optional[dict[str, Any]]:
 
     if response.status_code not in {200, 201} or not isinstance(payload, dict):
         raise RuntimeError(
-            extract_error_message(payload, f"appliance-service shutdown returned HTTP {response.status_code}"),
+            extract_error_message(payload, f"appliance-service state change returned HTTP {response.status_code}"),
         )
     return payload
 
@@ -160,12 +161,11 @@ def select_targets(
     appliance_ids: Optional[list[str]],
     max_shutdowns: int,
 ) -> list[dict[str, Any]]:
-    online = [a for a in appliances if str(a.get("state", "")).upper() == "ON"]
-
     if appliance_ids:
         wanted = {str(aid) for aid in appliance_ids}
-        return [a for a in online if str(a.get("id")) in wanted]
+        return [a for a in appliances if str(a.get("id")) in wanted]
 
+    online = [a for a in appliances if str(a.get("state", "")).upper() == "ON"]
     ranked = sorted(
         online,
         key=lambda a: (
@@ -206,11 +206,11 @@ def start_automator():
     try:
         appliances = fetch_appliances(uid)
 
-        if target_state != "OFF":
+        if target_state not in ("ON", "OFF"):
             return jsonify(
                 {
                     "success": False,
-                    "error": "Only target_state=OFF is supported in current automator version.",
+                    "error": "Only target_state=ON or OFF is supported in current automator version.",
                 }
             ), 400
 
@@ -225,7 +225,7 @@ def start_automator():
             aid = str(target.get("id") or "")
             if not aid:
                 continue
-            updated = shutdown_appliance(aid)
+            updated = change_appliance_state(aid, target_state)
             if updated:
                 changed_appliances.append(updated)
 

@@ -314,14 +314,22 @@ export default function SpatialEnergyPanel({ appliances: liveAppliances }: Spati
               </g>
             </g>
 
-            <g filter={activeApplianceId === "thermostat" ? "url(#layoutActiveGlow)" : undefined} className="transition-all duration-300">
+            <g 
+              filter={activeApplianceId === "thermostat" ? "url(#layoutActiveGlow)" : undefined} 
+              style={applianceById.thermostat?.status === "offline" ? { filter: "grayscale(100%)", opacity: 0.5 } : {}}
+              className="transition-all duration-300"
+            >
               <polygon points="170,255 190,245 190,275 170,285" fill="#cbd5e1" stroke="#94a3b8" strokeWidth="1" />
               <polygon points="172,257 188,249 188,273 172,281" fill="#0f172a" />
               <line x1="176" y1="265" x2="184" y2="261" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" />
               <circle cx="180" cy="272" r="1.5" fill="#10b981" />
             </g>
 
-            <g filter={activeApplianceId === "ac" ? "url(#layoutActiveGlow)" : undefined} className="transition-all duration-300">
+            <g 
+              filter={activeApplianceId === "ac" ? "url(#layoutActiveGlow)" : undefined} 
+              style={applianceById.ac?.status === "offline" ? { filter: "grayscale(100%)", opacity: 0.5 } : {}}
+              className="transition-all duration-300"
+            >
               <polygon points="190,170 300,115 300,145 190,200" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1" />
               <polygon points="300,115 315,122.5 315,152.5 300,145" fill="#e2e8f0" />
               <polygon points="190,200 300,145 315,152.5 205,207.5" fill="#f8fafc" />
@@ -331,7 +339,11 @@ export default function SpatialEnergyPanel({ appliances: liveAppliances }: Spati
               <rect x="200" y="175" width="10" height="4" fill="#cbd5e1" transform="rotate(-26.5 200 175)" />
             </g>
 
-            <g filter={activeApplianceId === "tv" ? "url(#layoutActiveGlow)" : undefined} className="transition-all duration-300">
+            <g 
+              filter={activeApplianceId === "tv" ? "url(#layoutActiveGlow)" : undefined} 
+              style={applianceById.tv?.status === "offline" ? { filter: "grayscale(100%)", opacity: 0.5 } : {}}
+              className="transition-all duration-300"
+            >
               <polygon points="490,280 600,335 600,245 490,190" fill="url(#layoutTvScreen)" stroke="#020617" strokeWidth="3" />
               <polygon points="485,280 490,280 490,190 485,190" fill="#1e293b" />
               {applianceById.tv?.status === "online" && (
@@ -344,7 +356,11 @@ export default function SpatialEnergyPanel({ appliances: liveAppliances }: Spati
               )}
             </g>
 
-            <g filter={activeApplianceId === "lights" ? "url(#layoutActiveGlow)" : undefined} className="transition-all duration-300">
+            <g 
+              filter={activeApplianceId === "lights" ? "url(#layoutActiveGlow)" : undefined} 
+              style={applianceById.lights?.status === "offline" ? { filter: "grayscale(100%)", opacity: 0.5 } : {}}
+              className="transition-all duration-300"
+            >
               {applianceById.lights?.status === "online" && (
                 <polygon points="380,130 420,130 500,400 300,400" fill="url(#layoutLightBeam)" pointerEvents="none" />
               )}
@@ -357,7 +373,11 @@ export default function SpatialEnergyPanel({ appliances: liveAppliances }: Spati
               )}
             </g>
 
-            <g filter={activeApplianceId === "fridge" ? "url(#layoutActiveGlow)" : undefined} className="transition-all duration-300">
+            <g 
+              filter={activeApplianceId === "fridge" ? "url(#layoutActiveGlow)" : undefined} 
+              style={applianceById.fridge?.status === "offline" ? { filter: "grayscale(100%)", opacity: 0.5 } : {}}
+              className="transition-all duration-300"
+            >
               <polygon points="640,230 680,250 650,265 610,245" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="1" />
               <polygon points="640,370 610,385 610,245 640,230" fill="#94a3b8" />
               <polygon points="610,385 650,405 650,265 610,245" fill="#cbd5e1" />
@@ -380,6 +400,12 @@ export default function SpatialEnergyPanel({ appliances: liveAppliances }: Spati
             {mappedAppliances.map((appliance) => {
               const isHovered = hoveredApplianceId === appliance.id;
               const Icon = appliance.icon;
+              const isOnline = appliance.status === "online";
+              const strokeColor = isOnline ? "#10b981" : "#94a3b8"; 
+              const dropShadowStyle = isOnline 
+                ? { filter: "drop-shadow(0px 8px 12px rgba(16,185,129,0.4))" }
+                : { filter: "drop-shadow(0px 4px 6px rgba(148,163,184,0.3))" };
+              
               return (
                 <g
                   key={`node-${appliance.id}`}
@@ -388,17 +414,8 @@ export default function SpatialEnergyPanel({ appliances: liveAppliances }: Spati
                   }`}
                   style={{ transformOrigin: `${appliance.nodePos.cx}px ${appliance.nodePos.cy}px` }}
                 >
-                  <polyline points={appliance.linePoints} fill="none" stroke="#ef4444" strokeWidth="2.5" strokeDasharray="6 6" strokeLinecap="round" />
-                  <circle
-                    cx={appliance.nodePos.cx}
-                    cy={appliance.nodePos.cy}
-                    r="36"
-                    fill="none"
-                    stroke="#ef4444"
-                    strokeWidth="2"
-                    className={isHovered ? "animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite]" : undefined}
-                  />
-                  <circle cx={appliance.nodePos.cx} cy={appliance.nodePos.cy} r="28" fill="#ef4444" style={{ filter: "drop-shadow(0px 8px 12px rgba(239,68,68,0.4))" }} />
+                  <polyline points={appliance.linePoints} fill="none" stroke={strokeColor} strokeWidth="2.5" strokeDasharray="6 6" strokeLinecap="round" />
+                  <circle cx={appliance.nodePos.cx} cy={appliance.nodePos.cy} r="28" fill={strokeColor} style={dropShadowStyle} />
                   <g transform={`translate(${appliance.nodePos.cx - 12}, ${appliance.nodePos.cy - 12})`}>
                     <Icon color="white" size={24} />
                   </g>

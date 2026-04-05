@@ -326,7 +326,7 @@ export default function App() {
   return (
     <div className="flex h-screen bg-white text-gray-900 font-sans selection:bg-blue-100">
       {/* SIDEBAR */}
-      <aside className="w-[260px] border-r border-gray-200 flex flex-col justify-between hidden md:flex">
+      <aside className="w-[260px] border-r border-gray-200 flex flex-col justify-between hidden md:flex sticky top-0 h-screen overflow-y-auto scrollbar-hide">
         <div>
           <div className="h-16 flex items-center px-6 border-b border-gray-200">
             <div className="w-6 h-6 bg-blue-600 text-white flex items-center justify-center font-bold text-xs rounded shadow-sm mr-3">

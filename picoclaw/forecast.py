@@ -418,10 +418,10 @@ def _build_deterministic_assessment(input_payload: dict[str, Any]) -> dict[str, 
     return assessment
 
 
-def _resolve_api_key() -> tuple[str | None, str | None]:
+def _resolve_api_key() -> str:
     api_key = os.getenv("PICOCLAW_API_KEY")
     if api_key:
-        return api_key, "PICOCLAW_API_KEY"
+        return api_key
 
     return None, None
 
@@ -488,16 +488,9 @@ def _enhance_with_ai(
     input_payload: dict[str, Any],
     deterministic_assessment: dict[str, Any],
 ) -> dict[str, Any] | None:
-    api_key, api_key_source = _resolve_api_key()
+    api_key = _resolve_api_key()
     if not api_key:
         return None
-
-    logger.info(
-        "Using %s ending in ...%s with model %s",
-        api_key_source,
-        api_key[-4:] if len(api_key) >= 4 else api_key,
-        DEFAULT_MODEL,
-    )
 
     prompt = "\n".join(
         [

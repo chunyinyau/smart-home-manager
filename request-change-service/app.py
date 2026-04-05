@@ -8,10 +8,10 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 
-CHANGE_APPLIANCE_STATE_PORT = int(os.getenv("PORT", "5011"))
-STATE_CHANGE_AUTOMATOR_SERVICE_URL = os.getenv(
-    "STATE_CHANGE_AUTOMATOR_SERVICE_URL",
-    "http://state_change_automator_service:5010",
+PORT = int(os.getenv("PORT", "5011"))
+CHANGE_STATE_SERVICE_URL = os.getenv(
+    "CHANGE_STATE_SERVICE_URL",
+    "http://change_state_service:5010",
 )
 HISTORY_SERVICE_URL = os.getenv("HISTORY_SERVICE_URL", "http://history_service:5005")
 REQUEST_TIMEOUT_SECONDS = float(os.getenv("REQUEST_TIMEOUT_SECONDS", "8"))
@@ -19,7 +19,7 @@ DEFAULT_UID = os.getenv("DEFAULT_UID", "user_demo_001")
 
 SERVICE_FALLBACK_URLS = {
     "automator": [
-        STATE_CHANGE_AUTOMATOR_SERVICE_URL,
+        CHANGE_STATE_SERVICE_URL,
         "http://host.docker.internal:5010",
         "http://127.0.0.1:5010",
         "http://localhost:5010",
@@ -206,14 +206,14 @@ def home():
     return jsonify(
         {
             "status": "online",
-            "service": "Change Appliance State Composite",
-            "endpoints": ["POST /api/change-appliance-state"],
+            "service": "Request Change Composite",
+            "endpoints": ["POST /api/request-change"],
         }
     ), 200
 
 
-@app.route("/api/change-appliance-state", methods=["POST"])
-def change_appliance_state():
+@app.route("/api/request-change", methods=["POST"])
+def request_change():
     body = request.get_json(silent=True) or {}
 
     uid = str(body.get("uid") or DEFAULT_UID)
@@ -236,7 +236,7 @@ def change_appliance_state():
         automator_response = request_with_fallback(
             "automator",
             "POST",
-            "/api/state-change-automator/start",
+            "/api/change-state/start",
             json_body=automator_request,
         )
         automator_payload = parse_response_json(automator_response)
@@ -247,7 +247,7 @@ def change_appliance_state():
                     "success": False,
                     "error": extract_error_message(
                         automator_payload,
-                        f"state-change-automator returned HTTP {automator_response.status_code}",
+                        f"change-state returned HTTP {automator_response.status_code}",
                     ),
                 }
             ), 502
@@ -293,5 +293,5 @@ def change_appliance_state():
 
 
 if __name__ == "__main__":
-    print(f"Change appliance state composite service ready on port {CHANGE_APPLIANCE_STATE_PORT}", flush=True)
-    app.run(host="0.0.0.0", port=CHANGE_APPLIANCE_STATE_PORT, debug=False)
+    print(f"Request change composite service ready on port {PORT}", flush=True)
+    app.run(host="0.0.0.0", port=PORT, debug=False)

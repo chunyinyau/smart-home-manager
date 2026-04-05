@@ -5,7 +5,7 @@ import {
 } from "@/lib/clients/service-discovery";
 import { DEMO_UID } from "@/lib/shared/constants";
 
-export interface ChangeApplianceStateResult {
+export interface RequestChangeResult {
   success?: boolean;
   error?: string;
   confirmation_text?: string;
@@ -23,21 +23,21 @@ export interface ChangeApplianceStateResult {
   automator?: unknown;
 }
 
-async function readChangeApplianceStateError(response: Response): Promise<string> {
+async function readRequestChangeError(response: Response): Promise<string> {
   const payload = await readJsonBody<Record<string, unknown>>(response);
-  return extractErrorMessage(payload, "Change appliance state composite returned an error");
+  return extractErrorMessage(payload, "Request change composite returned an error");
 }
 
-export async function changeApplianceState(params: {
+export async function requestChange(params: {
   uid?: string;
   aid?: string;
   targetState?: "OFF" | "ON";
-}): Promise<ChangeApplianceStateResult> {
+}): Promise<RequestChangeResult> {
   const applianceIds = params.aid ? [params.aid] : undefined;
 
   const response = await fetchService(
-    "changeappliancestate",
-    "/api/change-appliance-state",
+    "requestchange",
+    "/api/request-change",
     {
       method: "POST",
       headers: {

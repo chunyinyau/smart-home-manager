@@ -28,6 +28,10 @@ function resolveBaseUrl(defaultUrl, envKeys) {
 }
 
 const baseUrl = resolveBaseUrl(DEFAULT_BASE_URL, ["SMOKE_BASE_URL"]);
+const publicGatewayBaseUrl = resolveBaseUrl("", [
+  "SMOKE_PUBLIC_GATEWAY_BASE_URL",
+  "OPENCLAW_PUBLIC_BASE_URL",
+]);
 const timeoutMs = Number.parseInt(
   process.env.SMOKE_TIMEOUT_MS ?? String(DEFAULT_TIMEOUT_MS),
   10,
@@ -193,6 +197,47 @@ const checks = [
   },
 ];
 
+if (publicGatewayBaseUrl) {
+  checks.push(
+    {
+      name: "Public UpdateBudget Route",
+      method: "PUT",
+      path: `/updatebudget/api/updatebudget/${encodeURIComponent(budgetUserId)}`,
+      baseUrl: publicGatewayBaseUrl,
+      label: "public-gateway",
+      expectedStatuses: [200],
+      toleratedStatuses: [],
+      body: { budget_cap: 150, monthlyCap: 150 },
+    },
+    {
+      name: "Public Request Change Route",
+      method: "POST",
+      path: "/request-change/api/request-change",
+      baseUrl: publicGatewayBaseUrl,
+      label: "public-gateway",
+      expectedStatuses: [200],
+      toleratedStatuses: [],
+      body: {
+        uid: historyUserId,
+        target_state: "OFF",
+      },
+    },
+    {
+      name: "Public Change Appliance State Route",
+      method: "POST",
+      path: "/change-appliance-state/api/change-appliance-state",
+      baseUrl: publicGatewayBaseUrl,
+      label: "public-gateway",
+      expectedStatuses: [200],
+      toleratedStatuses: [],
+      body: {
+        uid: historyUserId,
+        target_state: "OFF",
+      },
+    },
+  );
+}
+
 function getTimeoutSignal(ms) {
   if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
     return AbortSignal.timeout(ms);
@@ -227,13 +272,21 @@ function toOneLine(value) {
 async function runCheck(check) {
   const started = Date.now();
   const url = `${check.baseUrl}${check.path}`;
+  const headers = {
+    Accept: "application/json",
+  };
+
+  let body;
+  if (check.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(check.body);
+  }
 
   try {
     const response = await fetch(url, {
       method: check.method,
-      headers: {
-        Accept: "application/json",
-      },
+      headers,
+      body,
       signal: getTimeoutSignal(timeoutMs),
     });
 

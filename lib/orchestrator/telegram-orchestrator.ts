@@ -9,6 +9,7 @@ import {
   fetchService,
   readJsonBody,
 } from "@/lib/clients/service-discovery";
+import { fetchPublicEndpoint, resolvePublicEndpointUrl } from "@/lib/clients/public-endpoints";
 import { DEMO_UID } from "@/lib/shared/constants";
 import type { TelegramIntent } from "@/lib/shared/types";
 
@@ -63,12 +64,48 @@ async function getBudgetStatus(userId: number) {
 }
 
 async function updateMonthlyCap(userId: number, monthlyCap: number) {
+  const roundedMonthlyCap = Number(monthlyCap.toFixed(2));
+  const publicUrl = resolvePublicEndpointUrl(
+    ["OPENCLAW_UPDATE_BUDGET_URL", "UPDATE_BUDGET_PUBLIC_URL"],
+    { userId },
+  );
+
+  if (publicUrl) {
+    const publicMethod = publicUrl.includes(String(userId)) ? "PUT" : "POST";
+    const response = await fetchPublicEndpoint(
+      ["OPENCLAW_UPDATE_BUDGET_URL", "UPDATE_BUDGET_PUBLIC_URL"],
+      { userId },
+      {
+        method: publicMethod,
+        body:
+          publicMethod === "PUT"
+            ? { budget_cap: roundedMonthlyCap, monthlyCap: roundedMonthlyCap }
+            : { user_id: userId, budget_cap: roundedMonthlyCap, monthlyCap: roundedMonthlyCap },
+        timeoutMs: 12000,
+      },
+    );
+
+    if (!response) {
+      throw new Error("Public update budget endpoint is not configured");
+    }
+
+    const payload = await readJsonBody<BudgetServicePayload>(response);
+
+    if (!response.ok || payload?.success === false) {
+      throw new Error(
+        extractErrorMessage(payload, `Update budget endpoint returned HTTP ${response.status}`),
+      );
+    }
+
+    return payload?.data ?? payload ?? null;
+  }
+
   const response = await fetchService("budget", `/api/budget/${userId}/cap`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ budget_cap: Number(monthlyCap.toFixed(2)) }),
+    body: JSON.stringify({ budget_cap: roundedMonthlyCap }),
   });
   const payload = await readJsonBody<BudgetServicePayload>(response);
 

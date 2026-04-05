@@ -101,12 +101,25 @@ export function getServiceBaseUrls(service: ServiceKey): string[] {
     parseEnvUrls(process.env[envVar]),
   );
 
-  const fallbackUrls = [
-    `http://${config.dockerHost}:${config.port}`,
-    `http://host.docker.internal:${config.port}`,
-    `http://127.0.0.1:${config.port}`,
-    `http://localhost:${config.port}`,
-  ].map(normalizeBaseUrl);
+  const preferLocalhost =
+    process.env.SERVICE_DISCOVERY_PREFER_LOCALHOST === "1" ||
+    process.env.NODE_ENV === "development";
+
+  const fallbackUrls = (
+    preferLocalhost
+      ? [
+          `http://127.0.0.1:${config.port}`,
+          `http://localhost:${config.port}`,
+          `http://${config.dockerHost}:${config.port}`,
+          `http://host.docker.internal:${config.port}`,
+        ]
+      : [
+          `http://${config.dockerHost}:${config.port}`,
+          `http://host.docker.internal:${config.port}`,
+          `http://127.0.0.1:${config.port}`,
+          `http://localhost:${config.port}`,
+        ]
+  ).map(normalizeBaseUrl);
 
   return [...new Set([...configuredUrls, ...fallbackUrls])];
 }
@@ -115,12 +128,21 @@ interface FetchServiceOptions extends RequestInit {
   timeoutMs?: number;
 }
 
+const DEFAULT_SERVICE_TIMEOUT_MS = Number.parseInt(
+  process.env.SERVICE_REQUEST_TIMEOUT_MS ?? "2500",
+  10,
+);
+
 export async function fetchService(
   service: ServiceKey,
   path: string,
   options: FetchServiceOptions = {},
 ): Promise<Response> {
-  const { timeoutMs = 5000, ...requestInit } = options;
+  const timeoutMs = Number.isFinite(DEFAULT_SERVICE_TIMEOUT_MS)
+    ? Math.max(250, DEFAULT_SERVICE_TIMEOUT_MS)
+    : 1500;
+  const { timeoutMs: overrideTimeoutMs, ...requestInit } = options;
+  const resolvedTimeoutMs = overrideTimeoutMs ?? timeoutMs;
   const baseUrls = getServiceBaseUrls(service);
 
   let lastError: unknown = null;
@@ -130,7 +152,7 @@ export async function fetchService(
     const init: RequestInit = {
       ...requestInit,
       cache: requestInit.cache ?? "no-store",
-      signal: requestInit.signal ?? AbortSignal.timeout(timeoutMs),
+      signal: requestInit.signal ?? AbortSignal.timeout(resolvedTimeoutMs),
     };
 
     try {

@@ -111,10 +111,10 @@ export default function App() {
 
   const fetchDashboardData = async (isManual = false) => {
     try {
-      const [rateResponse, displayResponse, recommendationResponse] = await Promise.all([
+      const recommendationPromise = fetch(`/api/forecast/recommendation?uid=${DEMO_UID}`, { cache: 'no-store' });
+      const [rateResponse, displayResponse] = await Promise.all([
         fetch('/api/rate', { cache: 'no-store' }),
         fetch(`/api/display?uid=${DEMO_UID}&profile_id=1`, { cache: 'no-store' }),
-        fetch(`/api/forecast/recommendation?uid=${DEMO_UID}`, { cache: 'no-store' }),
       ]);
 
       const ratePayload = await rateResponse.json();
@@ -126,12 +126,18 @@ export default function App() {
       const displayPayload = await displayResponse.json();
       setData(displayPayload);
 
-      if (recommendationResponse.ok) {
-        const recommendationPayload = (await recommendationResponse.json()) as ForecastRecommendationPayload;
-        setForecastRecommendation(recommendationPayload);
-      } else {
-        setForecastRecommendation(null);
-      }
+      void recommendationPromise
+        .then(async (recommendationResponse) => {
+          if (recommendationResponse.ok) {
+            const recommendationPayload = (await recommendationResponse.json()) as ForecastRecommendationPayload;
+            setForecastRecommendation(recommendationPayload);
+          } else {
+            setForecastRecommendation(null);
+          }
+        })
+        .catch(() => {
+          setForecastRecommendation(null);
+        });
 
       // If persisted budget is still zero after restart, show immediate CSV-derived accrual.
       const budgetCumBill = Number(displayPayload?.budget?.cum_bill ?? 0);
@@ -800,10 +806,10 @@ export default function App() {
 
                   <div
                     id="suggested-actions-panel"
-                    className={`overflow-hidden transition-all duration-300 ease-in-out ${
+                    className={`transition-all duration-300 ease-in-out ${
                       suggestedActionsOpen
-                        ? 'max-h-96 opacity-100 mt-4 pt-3 border-t border-blue-200'
-                        : 'max-h-0 opacity-0'
+                        ? 'max-h-[70vh] overflow-y-auto opacity-100 mt-4 pt-3 border-t border-blue-200 pr-1'
+                        : 'max-h-0 overflow-hidden opacity-0'
                     }`}
                   >
                     {!isActionableRisk ? (

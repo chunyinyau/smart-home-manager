@@ -928,6 +928,7 @@ def handle_forecast_request() -> Any:
 def build_recommendation_plan(uid: str, user_id: int, profile_id: str) -> dict[str, Any]:
     forecast = build_forecast(uid, user_id, profile_id)
     appliances = fetch_appliance_snapshot(uid)
+    cron_gap_buffer_minutes = 15
 
     active = [
         appliance
@@ -979,9 +980,9 @@ def build_recommendation_plan(uid: str, user_id: int, profile_id: str) -> dict[s
         return True
 
     min_duration_by_risk = {
-        "CRITICAL": 120,
-        "HIGH": 60,
-        "SAFE": 30,
+        "CRITICAL": 240,
+        "HIGH": 180,
+        "SAFE": 45,
     }
     max_devices_by_risk = {
         "CRITICAL": 3,
@@ -989,9 +990,9 @@ def build_recommendation_plan(uid: str, user_id: int, profile_id: str) -> dict[s
         "SAFE": 1,
     }
     max_duration_by_risk = {
-        "CRITICAL": 360,
-        "HIGH": 180,
-        "SAFE": 60,
+        "CRITICAL": 720,
+        "HIGH": 360,
+        "SAFE": 90,
     }
 
     duration_minutes = min_duration_by_risk.get(risk_level, 30)
@@ -1044,9 +1045,10 @@ def build_recommendation_plan(uid: str, user_id: int, profile_id: str) -> dict[s
         if price_per_kwh > 0:
             savings_per_minute = ((watts / 1000.0) * price_per_kwh) / 60.0
 
-        suggested_duration_minutes = duration_minutes
+        suggested_duration_minutes = duration_minutes + cron_gap_buffer_minutes
         if remaining_savings_for_safe > 0 and savings_per_minute > 0:
             required_minutes = int((remaining_savings_for_safe / savings_per_minute) + 0.9999)
+            required_minutes += cron_gap_buffer_minutes
             suggested_duration_minutes = max(suggested_duration_minutes, required_minutes)
 
         suggested_duration_minutes = max(1, min(suggested_duration_minutes, max_duration_minutes))

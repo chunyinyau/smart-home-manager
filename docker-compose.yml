@@ -24,8 +24,8 @@ services:
       - display_service
       - calculatebill_service
       - forecastbill_service
-      - change_appliance_state_service
-      - state_change_automator_service
+      - request_change_service
+      - change_state_service
 
   # 0. RabbitMQ Broker (Ports 5672 and 15672 on host)
   rabbitmq:

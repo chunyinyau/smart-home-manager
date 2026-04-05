@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 from datetime import date, datetime, timezone
 from math import ceil
-from typing import Any
+from typing import Any, Optional
 
 AI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 DEFAULT_MODEL = os.getenv("PICOCLAW_MODEL", "gpt-5.4-mini")
@@ -418,12 +418,12 @@ def _build_deterministic_assessment(input_payload: dict[str, Any]) -> dict[str, 
     return assessment
 
 
-def _resolve_api_key() -> str:
-    api_key = os.getenv("PICOCLAW_API_KEY")
-    if api_key:
-        return api_key
+def _resolve_api_key() -> Optional[str]:
+    api_key = os.getenv("PICOCLAW_API_KEY") or os.getenv("OPENAI_API_KEY")
+    if isinstance(api_key, str) and api_key.strip():
+        return api_key.strip()
 
-    return None, None
+    return None
 
 
 def _extract_output_text(payload: dict[str, Any]) -> str | None:

@@ -297,43 +297,27 @@ export async function handleTelegramIntent(
     }
 
     const requestedMonthlyCap = Number(params.monthlyCap.toFixed(2));
+    if (requestedMonthlyCap < 0) {
+      return { error: "monthlyCap must be 0 or greater." };
+    }
+
     const billingSync = await syncLatestBilling(userId, uid);
     const forecast = await getForecast(uid);
     const projectedMonthlySpend = Number(forecast.projectedCost ?? 0);
 
-    if (requestedMonthlyCap < projectedMonthlySpend) {
-      const message = `Budget update rejected. Requested cap of $${requestedMonthlyCap.toFixed(2)} is below projected spend of $${projectedMonthlySpend.toFixed(2)}.`;
-
-      try {
-        await logHistory(uid, message);
-      } catch (error) {
-        console.warn("History logging failed after rejected set_budget intent:", error);
-      }
-
-      return {
-        accepted: false,
-        action: "budget_update_rejected",
-        requestedMonthlyCap,
-        projectedMonthlySpend,
-        forecast,
-        billingSync,
-        message,
-      };
-    }
-
     const budget = await updateMonthlyCap(userId, requestedMonthlyCap);
     const refreshedForecast = await getForecast(uid);
-    const message = `Budget updated to $${requestedMonthlyCap.toFixed(2)} after validating projected spend of $${projectedMonthlySpend.toFixed(2)}.`;
+    const message = `Budget updated to $${requestedMonthlyCap.toFixed(2)}. Current projected spend is $${projectedMonthlySpend.toFixed(2)}.`;
 
     try {
       await logHistory(uid, message);
     } catch (error) {
-      console.warn("History logging failed after accepted set_budget intent:", error);
+      console.warn("History logging failed after set_budget intent:", error);
     }
 
     return {
       accepted: true,
-      action: "budget_update_accepted",
+      action: "budget_update_applied",
       requestedMonthlyCap,
       projectedMonthlySpend,
       forecast: refreshedForecast,

@@ -166,10 +166,10 @@ def update_budget_cap(user_id):
 
         try:
             budget_cap = float(body['budget_cap'])
-            if budget_cap <= 0:
+            if budget_cap < 0:
                 raise ValueError()
         except (TypeError, ValueError):
-            return jsonify({"success": False, "error": "budget_cap must be a positive number"}), 400
+            return jsonify({"success": False, "error": "budget_cap must be a number >= 0"}), 400
 
         budget = Budget.query.filter_by(user_id=user_id).first()
         if not budget:

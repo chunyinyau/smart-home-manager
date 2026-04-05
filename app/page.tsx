@@ -50,7 +50,24 @@ type ForecastRecommendationPayload = {
   target?: {
     requiredSavingsForSafeSgd?: number;
     remainingSavingsForSafeSgd?: number;
+    requiredSavingsForSafetyNetSgd?: number;
+    remainingSavingsForSafetyNetSgd?: number;
+    safeThresholdRatio?: number;
+    safeMinimumBudgetCap?: number;
+    targetSafetyThresholdRatio?: number;
     met?: boolean;
+    metSafetyNet?: boolean;
+    feasibilityStatus?: 'achievable' | 'stretch' | 'not_achievable';
+    feasibilityGapSgd?: number;
+    maxPotentialSavingsSgd?: number;
+    conservativePotentialSavingsSgd?: number;
+    easyPotentialSavingsSgd?: number;
+    feasibleMinBudgetCap?: number;
+    nearestFeasibleBudgetCap?: number;
+    recommendedBudgetCapRange?: {
+      low?: number;
+      high?: number;
+    };
   };
   recommendations?: Array<{
     applianceId?: string;
@@ -72,6 +89,32 @@ type ReactivationItem = {
   name: string;
   until?: string | null;
 };
+
+type OptionBApplyPayload = {
+  success?: boolean;
+  message?: string;
+  error?: string;
+  budget?: {
+    budgetCap?: number;
+    rolledBack?: boolean;
+  };
+  safeguard?: {
+    applied?: boolean;
+    reason?: string;
+    stabilizedCap?: number;
+    maxBudgetCap?: number | null;
+    rolledBack?: boolean;
+  };
+  actions?: {
+    requestedCount?: number;
+    appliedCount?: number;
+    failedCount?: number;
+  };
+};
+
+const OPTION_B_MIN_CAP_DELTA_SGD = 0.5;
+const OPTION_B_MIN_ACTION_SAVINGS_SGD = 0.25;
+const OPTION_B_MIN_TOTAL_SAVINGS_SGD = 0.5;
 
 function formatUtcTimestamp(value: string | null | undefined): string {
   if (!value) {
@@ -119,16 +162,20 @@ export default function App() {
   const [forecastRecommendation, setForecastRecommendation] = useState<ForecastRecommendationPayload | null>(null);
   const [applyingActionId, setApplyingActionId] = useState<string | null>(null);
   const [applyingAllActions, setApplyingAllActions] = useState(false);
+  const [applyingOptionA, setApplyingOptionA] = useState(false);
+  const [applyingOptionB, setApplyingOptionB] = useState(false);
   const [restoringActionId, setRestoringActionId] = useState<string | null>(null);
   const [restoringAllActions, setRestoringAllActions] = useState(false);
   const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [liveForecastNarrative, setLiveForecastNarrative] = useState<string | null>(null);
 
   const fetchDashboardData = async (isManual = false) => {
     try {
-      const recommendationPromise = fetch(`/api/forecast/recommendation?uid=${DEMO_UID}`, { cache: 'no-store' });
-      const [rateResponse, displayResponse] = await Promise.all([
+      const [rateResponse, displayResponse, recommendationResponse, forecastResponse] = await Promise.all([
         fetch('/api/rate', { cache: 'no-store' }),
         fetch(`/api/display?uid=${DEMO_UID}&profile_id=1`, { cache: 'no-store' }),
+        fetch(`/api/forecast/recommendation?uid=${DEMO_UID}`, { cache: 'no-store' }),
+        fetch(`/api/forecast?uid=${DEMO_UID}`, { cache: 'no-store' }),
       ]);
 
       const ratePayload = await rateResponse.json();
@@ -138,23 +185,32 @@ export default function App() {
       }
 
       const displayPayload = await displayResponse.json();
-      setData(displayPayload);
+      let finalDisplayPayload = displayPayload;
 
-      void recommendationPromise
-        .then(async (recommendationResponse) => {
-          if (recommendationResponse.ok) {
-            const recommendationPayload = (await recommendationResponse.json()) as ForecastRecommendationPayload;
-            setForecastRecommendation(recommendationPayload);
-          } else {
-            setForecastRecommendation(null);
-          }
-        })
-        .catch(() => {
-          setForecastRecommendation(null);
-        });
+      if (forecastResponse.ok) {
+        const forecastPayload = await forecastResponse.json();
+        if (typeof forecastPayload?.shortNarrative === 'string' && forecastPayload.shortNarrative.trim().length > 0) {
+          setLiveForecastNarrative(forecastPayload.shortNarrative.trim());
+        }
+        finalDisplayPayload = {
+          ...displayPayload,
+          forecast: forecastPayload,
+        };
+      } else {
+        setLiveForecastNarrative(null);
+      }
+
+      setData(finalDisplayPayload);
+
+      if (recommendationResponse.ok) {
+        const recommendationPayload = (await recommendationResponse.json()) as ForecastRecommendationPayload;
+        setForecastRecommendation(recommendationPayload);
+      } else {
+        setForecastRecommendation(null);
+      }
 
       // If persisted budget is still zero after restart, show immediate CSV-derived accrual.
-      const budgetCumBill = Number(displayPayload?.budget?.cum_bill ?? 0);
+      const budgetCumBill = Number(finalDisplayPayload?.budget?.cum_bill ?? 0);
       if (budgetCumBill <= 0 && ratePayload?.data) {
         const accrualResponse = await fetch('/api/appliance/telemetry/accrual', {
           cache: 'no-store',
@@ -189,7 +245,7 @@ export default function App() {
     const runPoll = async () => {
       const success = await fetchDashboardData();
       if (alive) {
-        const nextDelayMs = success ? 300000 : 5000;
+        const nextDelayMs = success ? 60000 : 5000;
         timeoutId = window.setTimeout(runPoll, nextDelayMs);
       }
     };
@@ -237,7 +293,7 @@ export default function App() {
       } finally {
         if (alive) {
           setCronStateLoading(false);
-          const nextDelayMs = success ? 300000 : 5000;
+          const nextDelayMs = success ? 60000 : 5000;
           timeoutId = window.setTimeout(fetchCronState, nextDelayMs);
         }
       }
@@ -278,6 +334,15 @@ export default function App() {
       }
 
       setBillRunResult(payload);
+      await fetchDashboardData(true);
+
+      const cronResponse = await fetch('/api/calculatebill/state', { cache: 'no-store' });
+      if (cronResponse.ok) {
+        const cronPayload = (await cronResponse.json()) as CalculateBillStatePayload;
+        const stateData = cronPayload.data ?? {};
+        setCronState(stateData);
+        setCronStateError(null);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       setBillRunError(message);
@@ -287,7 +352,14 @@ export default function App() {
   };
 
   const handleUpdateBudget = async () => {
-    if (!budgetCapInput || isNaN(Number(budgetCapInput))) return;
+    const parsedMonthlyCap = Number.parseFloat(budgetCapInput);
+    if (!Number.isFinite(parsedMonthlyCap) || parsedMonthlyCap < 0) {
+      setBudgetActionFeedback({ type: 'error', message: 'Enter a valid amount (0 or above).' });
+      return;
+    }
+
+    const monthlyCap = Number(parsedMonthlyCap.toFixed(2));
+
     setUpdatingBudget(true);
     setBudgetActionFeedback(null);
     try {
@@ -296,14 +368,16 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           intent: 'set_budget',
-          params: { uid: DEMO_UID, monthlyCap: Number(budgetCapInput) }
+          params: { uid: DEMO_UID, monthlyCap }
         }),
       });
       const result = await response.json();
       if (!response.ok || (result.accepted === false)) {
         setBudgetActionFeedback({ type: 'error', message: result.message || result.error || 'Failed to update budget' });
       } else {
-        setBudgetActionFeedback({ type: 'success', message: 'Budget updated successfully' });
+        setBudgetActionFeedback({ type: 'success', message: `Budget cap updated to $${monthlyCap.toFixed(2)}.` });
+        setBudgetCapInput(monthlyCap.toFixed(2));
+        await fetchDashboardData(true);
         // Force refresh or update local state
         setTimeout(() => setBudgetMenuOpen(false), 2000);
       }
@@ -313,6 +387,17 @@ export default function App() {
       setUpdatingBudget(false);
     }
   };
+
+  useEffect(() => {
+    if (updatingBudget || budgetMenuOpen) {
+      return;
+    }
+
+    const latestBudgetCap = Number(data?.budget?.budget_cap ?? NaN);
+    if (Number.isFinite(latestBudgetCap) && latestBudgetCap >= 0) {
+      setBudgetCapInput(latestBudgetCap.toFixed(2));
+    }
+  }, [data?.budget?.budget_cap, updatingBudget, budgetMenuOpen]);
 
   const handleAutoShutdown = async () => {
     setAutomatingState(true);
@@ -379,7 +464,13 @@ export default function App() {
   };
 
   const handleApplySuggestedAction = async (action: RecommendedActionItem) => {
-    if (applyingAllActions || restoringAllActions || restoringActionId !== null) {
+    if (
+      applyingOptionA ||
+      applyingOptionB ||
+      applyingAllActions ||
+      restoringAllActions ||
+      restoringActionId !== null
+    ) {
       return;
     }
 
@@ -424,6 +515,10 @@ export default function App() {
     }
 
     if (restoringAllActions || restoringActionId !== null) {
+      return;
+    }
+
+    if (applyingOptionA || applyingOptionB) {
       return;
     }
 
@@ -473,8 +568,195 @@ export default function App() {
     }
   };
 
+  const handleApplyOptionAPlan = async () => {
+    if (
+      applyingOptionA ||
+      applyingOptionB ||
+      applyingAllActions ||
+      applyingActionId !== null ||
+      restoringAllActions ||
+      restoringActionId !== null
+    ) {
+      return;
+    }
+
+    const resolvedBudgetCap = optionABudgetCap;
+    if (!Number.isFinite(resolvedBudgetCap) || resolvedBudgetCap <= 0) {
+      setActionFeedback({ type: 'error', message: 'Option A safe minimum budget cap is unavailable.' });
+      return;
+    }
+
+    setApplyingOptionA(true);
+    setActionFeedback(null);
+    setBudgetActionFeedback(null);
+
+    try {
+      const response = await fetch('/api/forecast/option-a', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          uid: DEMO_UID,
+          userId: Number(data?.budget?.user_id ?? 1),
+          restoreOverrides: true,
+        }),
+      });
+
+      const payload = (await response.json()) as OptionBApplyPayload;
+      if (!response.ok || payload.success === false) {
+        throw new Error(payload.message || payload.error || `HTTP ${response.status}`);
+      }
+
+      const persistedCap = Number(payload.budget?.budgetCap ?? resolvedBudgetCap);
+      const restoredCount = Number((payload as { restoredOverrides?: { restoredCount?: number } }).restoredOverrides?.restoredCount ?? 0);
+
+      setBudgetActionFeedback({
+        type: 'success',
+        message: `Option A saved budget cap at $${persistedCap.toFixed(2)}.`,
+      });
+      setActionFeedback({
+        type: 'success',
+        message: restoredCount > 0
+          ? `Option A applied. Restored ${restoredCount} appliance override(s) and recalculated baseline budget.`
+          : 'Option A applied. SAFE minimum budget cap is now persisted.',
+      });
+
+      setData((prev) => {
+        if (!prev?.budget) {
+          return prev;
+        }
+        return {
+          ...prev,
+          budget: {
+            ...prev.budget,
+            budget_cap: persistedCap,
+          },
+        };
+      });
+      void fetchDashboardData(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to apply Option A plan';
+      setActionFeedback({ type: 'error', message });
+    } finally {
+      setApplyingOptionA(false);
+    }
+  };
+
+  const handleApplyOptionBPlan = async () => {
+    if (
+      applyingOptionA ||
+      applyingOptionB ||
+      applyingAllActions ||
+      applyingActionId !== null ||
+      restoringAllActions ||
+      restoringActionId !== null
+    ) {
+      return;
+    }
+
+    const resolvedBudgetCap = optionBBudgetCap;
+    if (!Number.isFinite(resolvedBudgetCap) || resolvedBudgetCap <= 0) {
+      setActionFeedback({ type: 'error', message: 'Option B budget cap is unavailable.' });
+      return;
+    }
+
+    if (optionBActions.length === 0) {
+      setActionFeedback({ type: 'error', message: 'No meaningful mitigation actions available for Option B.' });
+      return;
+    }
+
+    if (plannedMitigationSavings < OPTION_B_MIN_TOTAL_SAVINGS_SGD) {
+      setActionFeedback({ type: 'error', message: `Option B needs at least $${OPTION_B_MIN_TOTAL_SAVINGS_SGD.toFixed(2)} estimated savings.` });
+      return;
+    }
+
+    if (optionABudgetCap > 0 && resolvedBudgetCap >= optionABudgetCap) {
+      setActionFeedback({ type: 'error', message: 'Option B cap must stay below Option A.' });
+      return;
+    }
+
+    setApplyingOptionB(true);
+    setActionFeedback(null);
+    setBudgetActionFeedback(null);
+
+    try {
+      const response = await fetch('/api/forecast/option-b', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          uid: DEMO_UID,
+          userId: Number(data?.budget?.user_id ?? 1),
+          budgetCap: Number(resolvedBudgetCap.toFixed(2)),
+          maxBudgetCap:
+            optionABudgetCap > 0
+              ? Number(Math.max(optionABudgetCap - OPTION_B_MIN_CAP_DELTA_SGD, 0.01).toFixed(2))
+              : undefined,
+          actions: optionBActions.map((item) => ({
+            applianceId: item.applianceId,
+            name: item.name,
+            durationMinutes: item.durationMinutes,
+          })),
+        }),
+      });
+
+      const payload = (await response.json()) as OptionBApplyPayload;
+      if (!response.ok || payload.success === false) {
+        throw new Error(payload.message || payload.error || `HTTP ${response.status}`);
+      }
+
+      const appliedCount = Number(payload.actions?.appliedCount ?? 0);
+      const failedCount = Number(payload.actions?.failedCount ?? 0);
+      const persistedCap = Number(payload.budget?.budgetCap ?? resolvedBudgetCap);
+
+      setBudgetActionFeedback({
+        type: 'success',
+        message: `Option B saved budget cap at $${persistedCap.toFixed(2)}.`,
+      });
+
+      if (failedCount > 0) {
+        setActionFeedback({
+          type: 'error',
+          message: `Option B partially applied: ${appliedCount} action(s) applied, ${failedCount} failed.`,
+        });
+      } else {
+        setActionFeedback({
+          type: 'success',
+          message: `Option B applied successfully with ${appliedCount} mitigation action(s).`,
+        });
+      }
+
+      setData((prev) => {
+        if (!prev?.budget) {
+          return prev;
+        }
+        return {
+          ...prev,
+          budget: {
+            ...prev.budget,
+            budget_cap: persistedCap,
+          },
+        };
+      });
+      void fetchDashboardData(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to apply Option B plan';
+      setActionFeedback({ type: 'error', message });
+    } finally {
+      setApplyingOptionB(false);
+    }
+  };
+
   const handleTurnOnAppliance = async (item: ReactivationItem) => {
-    if (applyingAllActions || restoringAllActions || applyingActionId !== null) {
+    if (
+      applyingOptionA ||
+      applyingOptionB ||
+      applyingAllActions ||
+      restoringAllActions ||
+      applyingActionId !== null
+    ) {
       return;
     }
 
@@ -517,7 +799,7 @@ export default function App() {
       return;
     }
 
-    if (applyingAllActions || applyingActionId !== null) {
+    if (applyingOptionA || applyingOptionB || applyingAllActions || applyingActionId !== null) {
       return;
     }
 
@@ -568,6 +850,13 @@ export default function App() {
 
   const budget = data?.budget;
   const forecast = data?.forecast;
+  const recommendationParagraph =
+    (typeof liveForecastNarrative === 'string' && liveForecastNarrative.trim().length > 0
+      ? liveForecastNarrative.trim()
+      : typeof forecast?.shortNarrative === 'string'
+        ? forecast.shortNarrative.trim()
+        : '') ||
+    'AI recommendation is updating...';
   const fallbackMonth = (() => {
     const now = new Date();
     const sgt = new Date(now.getTime() + 8 * 60 * 60 * 1000);
@@ -575,7 +864,13 @@ export default function App() {
     const month = String(sgt.getUTCMonth() + 1).padStart(2, '0');
     return `${year}-${month}`;
   })();
+  const cronUserState = cronState?.["1"];
   const displayedAccruedSpend = (() => {
+    const cronRunningTotal = Number(cronUserState?.running_total ?? NaN);
+    if (Number.isFinite(cronRunningTotal) && cronRunningTotal >= 0) {
+      return cronRunningTotal;
+    }
+
     const persisted = Number(budget?.cum_bill ?? 0);
     if (persisted > 0) {
       return persisted;
@@ -584,7 +879,6 @@ export default function App() {
   })();
   const profile = data?.profile;
   const history = data?.history || [];
-  const cronUserState = cronState?.["1"];
   const budgetStatusValue = forecast?.riskLevel ?? '---';
   const budgetStatusColor =
     !forecast ? 'text-gray-400' :
@@ -641,6 +935,24 @@ export default function App() {
         return action;
       })
       .filter((item): item is RecommendedActionItem => item !== null) ?? [];
+  const optionBActions = (() => {
+    const ranked = [...recommendedActionItems].sort(
+      (a, b) => Number(b.estimatedSavingsSgd ?? 0) - Number(a.estimatedSavingsSgd ?? 0),
+    );
+
+    const meaningful = ranked.filter((item) => {
+      const estimatedSavings = Number(item.estimatedSavingsSgd ?? 0);
+      return estimatedSavings >= OPTION_B_MIN_ACTION_SAVINGS_SGD || item.durationMinutes >= 180;
+    });
+
+    if (meaningful.length > 0) {
+      return meaningful;
+    }
+
+    return ranked
+      .slice(0, 1)
+      .filter((item) => Number(item.estimatedSavingsSgd ?? 0) > 0);
+  })();
   const activeOffOverrideNames =
     (data?.appliances ?? [])
       .filter((appliance) => appliance?.manualOverride?.active && appliance?.state?.toUpperCase() === 'OFF')
@@ -654,9 +966,137 @@ export default function App() {
         name: appliance.name,
         until: appliance.manualOverride?.until,
       }));
-  const remainingSavingsForSafe = Number(
-    forecastRecommendation?.target?.remainingSavingsForSafeSgd ?? 0,
+  const remainingSavingsForSafetyNet = Number(
+    forecastRecommendation?.target?.remainingSavingsForSafetyNetSgd ?? 0,
   );
+  const safeThresholdRatio = Number(
+    forecastRecommendation?.target?.safeThresholdRatio ?? 0.85,
+  );
+  const safeMinimumBudgetCap = Number(
+    forecastRecommendation?.target?.safeMinimumBudgetCap ?? 0,
+  );
+  const targetSafetyThresholdRatio = Number(
+    forecastRecommendation?.target?.targetSafetyThresholdRatio ?? 0.82,
+  );
+  const feasibilityStatus = forecastRecommendation?.target?.feasibilityStatus;
+  const feasibilityRangeLow = Number(
+    forecastRecommendation?.target?.recommendedBudgetCapRange?.low ?? 0,
+  );
+  const feasibilityRangeHigh = Number(
+    forecastRecommendation?.target?.recommendedBudgetCapRange?.high ?? 0,
+  );
+  const feasibilityGap = Number(forecastRecommendation?.target?.feasibilityGapSgd ?? 0);
+  const nearestFeasibleCap = Number(forecastRecommendation?.target?.nearestFeasibleBudgetCap ?? 0);
+  const conservativePotentialSavings = Number(
+    forecastRecommendation?.target?.conservativePotentialSavingsSgd ?? 0,
+  );
+  const maxPotentialSavings = Number(
+    forecastRecommendation?.target?.maxPotentialSavingsSgd ?? 0,
+  );
+  const plannedMitigationSavings = optionBActions.reduce(
+    (total, item) => total + Number(item.estimatedSavingsSgd ?? 0),
+    0,
+  );
+  const feasibilityRangeSpan = Math.max(0, feasibilityRangeHigh - feasibilityRangeLow);
+  const feasibilityRangeLabel =
+    feasibilityRangeLow > 0 || feasibilityRangeHigh > 0
+      ? feasibilityRangeSpan < 0.5
+        ? `Around $${((feasibilityRangeLow + feasibilityRangeHigh) / 2).toFixed(2)}`
+        : `$${feasibilityRangeLow.toFixed(2)} to $${feasibilityRangeHigh.toFixed(2)}`
+      : 'Unavailable';
+  const optionABudgetCap = (() => {
+    if (Number.isFinite(safeMinimumBudgetCap) && safeMinimumBudgetCap > 0) {
+      return safeMinimumBudgetCap;
+    }
+
+    const projected = Number(forecast?.projectedCost ?? 0);
+    if (Number.isFinite(projected) && projected > 0 && safeThresholdRatio > 0) {
+      return Number(((projected + 0.01) / safeThresholdRatio).toFixed(2));
+    }
+
+    return 0;
+  })();
+  const optionBBudgetCap = (() => {
+    const normalizeLeanCap = (candidate: number) => {
+      if (!Number.isFinite(candidate) || candidate <= 0) {
+        return 0;
+      }
+
+      const optionAReference = Number(optionABudgetCap);
+      if (Number.isFinite(optionAReference) && optionAReference > 0) {
+        const lowerThanOptionA = Math.max(optionAReference - OPTION_B_MIN_CAP_DELTA_SGD, 0.01);
+        return Number(Math.min(candidate, lowerThanOptionA).toFixed(2));
+      }
+
+      return Number(candidate.toFixed(2));
+    };
+
+    const projectedCost = Number(forecast?.projectedCost ?? 0);
+    const modeledSavings = Math.max(
+      plannedMitigationSavings,
+      Number.isFinite(conservativePotentialSavings) ? conservativePotentialSavings : 0,
+    );
+    if (projectedCost > 0 && safeThresholdRatio > 0 && modeledSavings > 0) {
+      const leanCapFromMitigation = ((projectedCost - modeledSavings) + 0.01) / safeThresholdRatio;
+      if (Number.isFinite(leanCapFromMitigation) && leanCapFromMitigation > 0) {
+        return normalizeLeanCap(leanCapFromMitigation);
+      }
+    }
+
+    if (Number.isFinite(feasibilityRangeLow) && feasibilityRangeLow > 0) {
+      return normalizeLeanCap(feasibilityRangeLow);
+    }
+
+    if (Number.isFinite(nearestFeasibleCap) && nearestFeasibleCap > 0) {
+      return normalizeLeanCap(nearestFeasibleCap);
+    }
+
+    if (Number.isFinite(feasibilityRangeHigh) && feasibilityRangeHigh > 0) {
+      return normalizeLeanCap(feasibilityRangeHigh);
+    }
+
+    const currentCap = Number(budget?.budget_cap ?? 0);
+    if (Number.isFinite(currentCap) && currentCap > 0) {
+      return normalizeLeanCap(currentCap);
+    }
+
+    return 0;
+  })();
+  const currentBudgetCap = Number(budget?.budget_cap ?? 0);
+  const projectedForecastCost = Number(forecast?.projectedCost ?? 0);
+  const projectedUtilizationPct =
+    currentBudgetCap > 0 ? (projectedForecastCost / currentBudgetCap) * 100 : 0;
+  const utilizationProgressPct = Number.isFinite(projectedUtilizationPct)
+    ? Math.max(0, Math.min(projectedUtilizationPct, 100))
+    : 0;
+  const utilizationBarClass =
+    projectedUtilizationPct >= 100
+      ? 'bg-rose-500'
+      : projectedUtilizationPct >= 85
+        ? 'bg-amber-500'
+        : 'bg-emerald-500';
+  const projectedCapGap = currentBudgetCap > 0 ? projectedForecastCost - currentBudgetCap : 0;
+  const canApplyOptionA = optionABudgetCap > 0;
+  const canApplyOptionB =
+    optionBActions.length > 0 &&
+    optionBBudgetCap > 0 &&
+    plannedMitigationSavings >= OPTION_B_MIN_TOTAL_SAVINGS_SGD &&
+    (optionABudgetCap <= 0 || optionBBudgetCap < optionABudgetCap);
+  const feasibilityStatusMeta =
+    feasibilityStatus === 'achievable'
+      ? {
+          label: 'Achievable',
+          badgeClass: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+        }
+      : feasibilityStatus === 'stretch'
+        ? {
+            label: 'Stretch',
+            badgeClass: 'bg-amber-100 text-amber-700 border-amber-200',
+          }
+        : {
+            label: 'Not Achievable',
+            badgeClass: 'bg-rose-100 text-rose-700 border-rose-200',
+          };
 
   return (
     <div className="flex h-screen bg-white text-gray-900 font-sans selection:bg-blue-100 overflow-hidden">
@@ -723,7 +1163,7 @@ export default function App() {
             >
               <div className="flex items-center gap-3">
                 <Wallet className={budgetMenuOpen ? 'text-emerald-600' : 'text-gray-400'} size={18} />
-                Projected Budget
+                Change Budget Cap
               </div>
               <div className={`transform transition-transform duration-200 ${budgetMenuOpen ? 'rotate-180' : ''}`}>
                 <ChevronDown className="w-4 h-4 text-gray-400" />
@@ -731,7 +1171,7 @@ export default function App() {
             </button>
             {budgetMenuOpen && (
               <div className="pl-6 space-y-2 bg-emerald-50/30 rounded-md py-3 px-3 m-1 border border-emerald-100">
-                <p className="text-[11px] text-emerald-600 uppercase font-bold">Adjust Monthly Cap</p>
+                <p className="text-[11px] text-emerald-600 uppercase font-bold">Adjust Monthly Budget Cap</p>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <span className="absolute left-2.5 top-2 text-gray-400 text-xs">$</span>
@@ -880,13 +1320,13 @@ export default function App() {
             </div>
           </div>
         </header>
-        <div className="flex-1 overflow-y-auto p-8 max-w-[1400px] mx-auto w-full">
-          <div className="flex justify-between items-center mb-6">
+        <div className="flex-1 overflow-y-auto p-5 md:p-6 max-w-[1400px] mx-auto w-full">
+          <div className="flex justify-between items-center mb-4">
             <h1 className="text-[28px] font-semibold tracking-tight text-gray-900">Your Home</h1>
             {loading && <span className="text-sm text-blue-600 animate-pulse font-medium">Syncing with Microservices...</span>}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
             <MetricCard 
               value={`$${displayedAccruedSpend.toFixed(2)}`} 
               label="Accrued Spend" 
@@ -899,19 +1339,19 @@ export default function App() {
             />
             <MetricCard
               value={budgetStatusValue}
-              label="Budget Status"
+              label="Budget Risk"
               timeframe="Live Sync"
               valueColor={budgetStatusColor}
             />
             <MetricCard 
-              value={`$${budget?.budget_cap?.toFixed(0) || '---'}`} 
-              label="Monthly Cap" 
-              timeframe="User Setting" 
+              value={`$${budget?.budget_cap?.toFixed(2) || '---'}`} 
+              label="Monthly Budget Cap" 
+              timeframe="User Set" 
             />
           </div>
 
-          <div className="mb-8 border border-gray-200 rounded-2xl bg-white p-6 shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between gap-3 mb-6 border-b border-gray-100 pb-4">
+          <div className="mb-5 border border-gray-200 rounded-2xl bg-white p-4 shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between gap-3 mb-3 border-b border-gray-100 pb-3">
               <div className="flex items-center gap-2">
                 <Activity className="w-5 h-5 text-amber-600" />
                 <h2 className="text-lg font-bold text-gray-900">Forecast Outlook</h2>
@@ -924,50 +1364,85 @@ export default function App() {
             {!forecast ? (
               <div className="text-sm text-gray-500">Forecast data is not available yet.</div>
             ) : (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-6">
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-5">
-                    <div className="text-xs uppercase tracking-wider text-gray-500">Recommendation</div>
-                    <div className="mt-3 text-base font-medium leading-7 text-gray-800">
-                      {forecast.shortNarrative}
-                    </div>
-                    <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <ForecastStat
-                        label="Projected Spend"
-                        value={`$${forecast.projectedCost.toFixed(2)}`}
-                      />
-                      <ForecastStat
-                        label="Projected Usage"
-                        value={`${forecast.projectedKwh.toFixed(1)} kWh`}
-                      />
-                      <ForecastStat
-                        label="Days To Exceed"
-                        value={forecast.daysToExceed === null ? 'N/A' : String(forecast.daysToExceed)}
-                      />
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+                <div className="h-fit rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-4 shadow-sm">
+                  <div>
+                    <div className="text-xs uppercase tracking-wider text-gray-500">AI Recommendation</div>
+                    <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-3 text-base font-semibold leading-8 text-slate-900 md:text-lg">
+                      {recommendationParagraph}
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-4">
-                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                      <div className="text-xs uppercase tracking-wider text-gray-500">Forecast Risk</div>
-                      <div className={`text-2xl font-semibold mt-2 ${budgetStatusColor}`}>
-                        {forecast.riskLevel}
+                  <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <ForecastStat
+                      label="Risk"
+                      value={forecast.riskLevel}
+                    />
+                    <ForecastStat
+                      label="Projected Spend"
+                      value={`$${forecast.projectedCost.toFixed(2)}`}
+                    />
+                    <ForecastStat
+                      label="Days To Exceed"
+                      value={forecast.daysToExceed === null ? 'N/A' : String(forecast.daysToExceed)}
+                    />
+                    <ForecastStat
+                      label="Month"
+                      value={forecast.month}
+                    />
+                  </div>
+
+                  <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                        Budget Trajectory
+                      </div>
+                      <div className="text-xs font-medium text-slate-600">
+                        {currentBudgetCap > 0 ? `${projectedUtilizationPct.toFixed(1)}% of cap` : 'Cap unavailable'}
                       </div>
                     </div>
-                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                      <div className="text-xs uppercase tracking-wider text-gray-500">Month</div>
-                      <div className="text-xl font-semibold text-gray-900 mt-2">{forecast.month}</div>
+                    <div className="mt-2 h-2 rounded-full bg-slate-100">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${utilizationBarClass}`}
+                        style={{ width: `${utilizationProgressPct}%` }}
+                      />
                     </div>
-                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                      <div className="text-xs uppercase tracking-wider text-gray-500">Generated At</div>
-                      <div className="text-sm font-semibold text-gray-900 mt-2">
-                        {formatUtcTimestamp(forecast.generatedAt)}
+                    <div className="mt-2 flex items-center justify-between gap-2 text-xs text-slate-600">
+                      <span>Projected: ${projectedForecastCost.toFixed(2)}</span>
+                      <span>{currentBudgetCap > 0 ? `Cap: $${currentBudgetCap.toFixed(2)}` : 'Set cap to compare'}</span>
+                    </div>
+                    {currentBudgetCap > 0 && (
+                      <p className={`mt-1 text-xs font-medium ${projectedCapGap > 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
+                        {projectedCapGap > 0
+                          ? `Over cap by $${projectedCapGap.toFixed(2)}`
+                          : `$${Math.abs(projectedCapGap).toFixed(2)} below cap`}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-emerald-700">Option A</div>
+                      <div className="mt-1 text-lg font-bold text-emerald-800">
+                        {canApplyOptionA ? `$${optionABudgetCap.toFixed(2)}` : 'Unavailable'}
+                      </div>
+                      <div className="mt-1 text-xs text-emerald-700/90">Baseline SAFE cap with appliance restore.</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-100 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-slate-600">Option B</div>
+                      <div className="mt-1 text-lg font-bold text-slate-900">
+                        {canApplyOptionB ? `$${optionBBudgetCap.toFixed(2)}` : 'Conditional'}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-600">
+                        {canApplyOptionB
+                          ? `${optionBActions.length} OFF action${optionBActions.length === 1 ? '' : 's'} · Save ~$${plannedMitigationSavings.toFixed(2)}`
+                          : 'Needs lower cap than Option A and meaningful savings.'}
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+                <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-4 shadow-sm">
                   <button
                     type="button"
                     onClick={() => setSuggestedActionsOpen((open) => !open)}
@@ -976,104 +1451,135 @@ export default function App() {
                     className="w-full flex items-center justify-between gap-3 text-left"
                   >
                     <div>
-                      <div className="text-xs uppercase tracking-wider text-blue-600">Suggested Actions</div>
-                      <div className="mt-1 text-sm font-semibold text-blue-700">Appliances to Turn Off</div>
+                      <div className="text-xs uppercase tracking-wider text-gray-500">Actions</div>
+                      <div className="mt-1 text-sm font-semibold text-gray-800">Temporary OFF Plan</div>
                     </div>
                     <ChevronDown
-                      className={`w-5 h-5 text-blue-600 transition-transform duration-300 ${
+                      className={`w-5 h-5 text-gray-500 transition-transform duration-300 ${
                         suggestedActionsOpen ? 'rotate-180' : 'rotate-0'
                       }`}
                     />
                   </button>
 
+                  {forecastRecommendation?.target && (
+                    <div className="mt-3 rounded-xl border border-slate-200 bg-white p-4 text-slate-800 shadow-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                          Feasibility
+                        </div>
+                        <span
+                          className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${feasibilityStatusMeta.badgeClass}`}
+                        >
+                          {feasibilityStatusMeta.label}
+                        </span>
+                      </div>
+
+                      <p className="mt-2 text-sm leading-6 text-slate-600">
+                        Can your current cap return to SAFE with practical temporary OFF actions?
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">
+                        Safety target: {(targetSafetyThresholdRatio * 100).toFixed(0)}% of budget cap.
+                      </p>
+
+                      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                          <div className="text-xs font-medium uppercase tracking-wider text-slate-500">Cap Range</div>
+                          <div className="mt-1 text-base font-semibold text-slate-900">{feasibilityRangeLabel}</div>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                          <div className="text-xs font-medium uppercase tracking-wider text-slate-500">Nearest Cap</div>
+                          <div className="mt-1 text-base font-semibold text-slate-900">${nearestFeasibleCap.toFixed(2)}</div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 text-sm leading-6 text-slate-600">
+                      </div>
+                      <div className="mt-1 text-xs leading-5 text-slate-500">
+                        Option A is live-calculated. 
+                      </div>
+                      {canApplyOptionA && (
+                        <button
+                          type="button"
+                          onClick={handleApplyOptionAPlan}
+                          disabled={
+                            applyingOptionA ||
+                            applyingOptionB ||
+                            applyingAllActions ||
+                            applyingActionId !== null ||
+                            restoringAllActions ||
+                            restoringActionId !== null
+                          }
+                          className="mt-3 w-full rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"
+                        >
+                          {applyingOptionA
+                            ? 'Applying Option A'
+                            : `Option A: Restore appliances + set SAFE cap $${optionABudgetCap.toFixed(2)}`}
+                        </button>
+                      )}
+                      {canApplyOptionB && (
+                        <button
+                          type="button"
+                          onClick={handleApplyOptionBPlan}
+                          disabled={
+                            applyingOptionA ||
+                            applyingOptionB ||
+                            applyingAllActions ||
+                            applyingActionId !== null ||
+                            restoringAllActions ||
+                            restoringActionId !== null
+                          }
+                          className="mt-3 w-full rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                        >
+                          {applyingOptionB
+                            ? 'Applying Option B'
+                            : `Option B: Save cap $${optionBBudgetCap.toFixed(2)} + ${optionBActions.length} OFF action${optionBActions.length === 1 ? '' : 's'}`}
+                        </button>
+                      )}
+                      {!canApplyOptionB && recommendedActionItems.length > 0 && (
+                        <p className="mt-2 text-xs text-amber-700">
+                          Option B appears when the cap is below Option A and savings are meaningful.
+                        </p>
+                      )}
+                      {feasibilityStatus === 'not_achievable' && (
+                        <div className="mt-2 text-sm font-medium text-rose-600">
+                          Gap to SAFE target with current budget cap: ${feasibilityGap.toFixed(2)}.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div
                     id="suggested-actions-panel"
                     className={`transition-all duration-300 ease-in-out ${
                       suggestedActionsOpen
-                        ? 'max-h-[70vh] overflow-y-auto opacity-100 mt-4 pt-3 border-t border-blue-200 pr-1'
+                        ? 'max-h-[70vh] overflow-y-auto opacity-100 mt-4 pt-3 border-t border-gray-200 pr-1'
                         : 'max-h-0 overflow-hidden opacity-0'
                     }`}
                   >
                     {!isActionableRisk ? (
-                      <div className="text-sm text-blue-600/80">Risk is SAFE. No shutdown action needed now.</div>
-                    ) : suggestedActionItems.length > 0 ? (
-                      <ul className="space-y-2">
-                        {suggestedActionItems.map((item) => (
-                          <li key={item} className="text-sm text-blue-700 leading-6">
-                            • {item}
-                          </li>
-                        ))}
-                      </ul>
+                      <div className="text-sm text-gray-600">Risk is SAFE. No shutdown action needed now.</div>
                     ) : suggestedAppliances.length === 0 ? (
-                      <div className="space-y-1 text-sm text-blue-700/90">
-                        <p>All controllable appliances are currently OFF, so there is nothing additional to shut down.</p>
+                      <div className="space-y-1 text-sm text-gray-700">
+                        <p>All controllable appliances are already OFF.</p>
                         {activeOffOverrideNames.length > 0 && (
-                          <p className="text-xs text-blue-600/80">
-                            Active OFF overrides: {activeOffOverrideNames.join(', ')}.
+                          <p className="text-xs text-gray-500">
+                            Active OFF overrides: {activeOffOverrideNames.join(', ')}
                           </p>
                         )}
-                        {remainingSavingsForSafe > 0 && (
-                          <p className="text-xs text-blue-600/80">
-                            Additional savings needed to reach SAFE: ${remainingSavingsForSafe.toFixed(2)}.
+                        {remainingSavingsForSafetyNet > 0 && (
+                          <p className="text-xs text-gray-500">
+                            More savings needed: ${remainingSavingsForSafetyNet.toFixed(2)}
                           </p>
                         )}
                       </div>
                     ) : (
-                      <ul className="space-y-2">
-                        {suggestedAppliances.map((item) => (
-                          <li key={item} className="text-sm text-blue-700 leading-6">
-                            • {item}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-
-                    {recommendedActionItems.length > 0 && (
-                      <div className="mt-4 space-y-2 border-t border-blue-200 pt-3">
-                        {recommendedActionItems.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => handleApplyAllSuggestedActions(recommendedActionItems)}
-                            disabled={
-                              applyingAllActions ||
-                              applyingActionId !== null ||
-                              restoringAllActions ||
-                              restoringActionId !== null
-                            }
-                            className="w-full rounded-md bg-blue-700 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-60"
-                          >
-                            {applyingAllActions ? 'Applying All' : `Apply All (${recommendedActionItems.length})`}
-                          </button>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                        <div className="font-medium text-slate-900">Use Option B above to apply the OFF plan.</div>
+                        {plannedMitigationSavings > 0 && (
+                          <p className="mt-1 text-xs font-medium text-slate-700">
+                            Apply all saves about ${plannedMitigationSavings.toFixed(2)}.
+                          </p>
                         )}
-                        {recommendedActionItems.map((item) => (
-                          <div
-                            key={`${item.applianceId}-${item.durationMinutes}`}
-                            className="flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2"
-                          >
-                            <div className="min-w-0">
-                              <div className="truncate text-sm font-semibold text-blue-700">{item.name}</div>
-                              <div className="text-xs text-blue-600/80">
-                                OFF {item.durationMinutes} min
-                                {typeof item.estimatedSavingsSgd === 'number'
-                                  ? ` · Save ${item.estimatedSavingsSgd > 0 && item.estimatedSavingsSgd < 0.01 ? '<$0.01' : `$${item.estimatedSavingsSgd.toFixed(2)}`}`
-                                  : ''}
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => handleApplySuggestedAction(item)}
-                              disabled={
-                                applyingAllActions ||
-                                applyingActionId === item.applianceId ||
-                                restoringAllActions ||
-                                restoringActionId !== null
-                              }
-                              className="shrink-0 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-                            >
-                              {applyingAllActions ? 'Applying' : applyingActionId === item.applianceId ? 'Applying' : 'Apply'}
-                            </button>
-                          </div>
-                        ))}
                       </div>
                     )}
 
@@ -1090,6 +1596,8 @@ export default function App() {
                             type="button"
                             onClick={() => handleTurnOnAllAppliances(reactivationItems)}
                             disabled={
+                              applyingOptionB ||
+                              applyingOptionA ||
                               restoringAllActions ||
                               restoringActionId !== null ||
                               applyingAllActions ||
@@ -1117,6 +1625,8 @@ export default function App() {
                               type="button"
                               onClick={() => handleTurnOnAppliance(item)}
                               disabled={
+                                applyingOptionB ||
+                                applyingOptionA ||
                                 restoringAllActions ||
                                 restoringActionId === item.applianceId ||
                                 applyingAllActions ||
@@ -1209,25 +1719,32 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                  <div className="text-xs uppercase tracking-wider text-gray-500">Current Month</div>
-                  <div className="text-xl font-semibold text-gray-900 mt-1">{cronUserState.month ?? 'Unknown'}</div>
-                </div>
-                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                  <div className="text-xs uppercase tracking-wider text-gray-500">Running Total</div>
-                  <div className="text-xl font-semibold text-emerald-700 mt-1">
-                    ${Number(cronUserState.running_total ?? 0).toFixed(4)}
+              <div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                    <div className="text-xs uppercase tracking-wider text-gray-500">Current Month</div>
+                    <div className="text-xl font-semibold text-gray-900 mt-1">{cronUserState.month ?? 'Unknown'}</div>
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                    <div className="text-xs uppercase tracking-wider text-gray-500">Running Total</div>
+                    <div className="text-xl font-semibold text-emerald-700 mt-1">
+                      ${Number(cronUserState.running_total ?? 0).toFixed(4)}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                    <div className="text-xs uppercase tracking-wider text-gray-500">Last Updated</div>
+                    <div className="text-sm font-semibold text-gray-900 mt-2">
+                      {cronUserState.updated_at
+                        ? formatUtcTimestamp(cronUserState.updated_at)
+                        : 'Unknown'}
+                    </div>
                   </div>
                 </div>
-                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                  <div className="text-xs uppercase tracking-wider text-gray-500">Last Updated</div>
-                  <div className="text-sm font-semibold text-gray-900 mt-2">
-                    {cronUserState.updated_at
-                      ? formatUtcTimestamp(cronUserState.updated_at)
-                      : 'Unknown'}
-                  </div>
-                </div>
+                {cronUserState.closed_month && (
+                  <p className="mt-3 text-xs font-medium text-slate-600">
+                    Budget reset recorded for {cronUserState.closed_month}. New cycle is now {cronUserState.month ?? fallbackMonth}.
+                  </p>
+                )}
               </div>
             )}
           </div>

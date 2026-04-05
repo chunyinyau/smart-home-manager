@@ -269,6 +269,15 @@ export default function App() {
   const handleToggleAppliance = async (aid: string, currentState: string) => {
     const targetState = currentState.toUpperCase() === 'ON' ? 'OFF' : 'ON';
     setTogglingApplianceId(aid);
+
+    // Optimistic UI update: instantly update local state
+    if (data?.appliances) {
+      const updatedAppliances = data.appliances.map(app => 
+        app.id === aid ? { ...app, state: targetState as "OFF" | "ON" } : app
+      );
+      setData({ ...data, appliances: updatedAppliances });
+    }
+
     try {
       const response = await fetch('/api/request-change', {
         method: 'POST',
@@ -283,11 +292,16 @@ export default function App() {
       });
 
       if (response.ok) {
-        // Instant visual feedback: silent re-fetch
+        // Final sync to ensure everything is matched with backend
+        await fetchDashboardData(true);
+      } else {
+        // Revert on failure
         await fetchDashboardData(true);
       }
     } catch (err) {
       console.error("Toggle appliance failure:", err);
+      // Revert on error
+      await fetchDashboardData(true);
     } finally {
       setTogglingApplianceId(null);
     }
@@ -324,9 +338,9 @@ export default function App() {
   );
 
   return (
-    <div className="flex h-screen bg-white text-gray-900 font-sans selection:bg-blue-100">
+    <div className="flex h-screen bg-white text-gray-900 font-sans selection:bg-blue-100 overflow-hidden">
       {/* SIDEBAR */}
-      <aside className="w-[260px] border-r border-gray-200 flex flex-col justify-between hidden md:flex sticky top-0 h-screen overflow-y-auto scrollbar-hide">
+      <aside className="w-[260px] h-screen border-r border-gray-200 flex flex-col justify-between hidden md:flex sticky top-0 overflow-y-auto no-scrollbar bg-white z-20">
         <div>
           <div className="h-16 flex items-center px-6 border-b border-gray-200">
             <div className="w-6 h-6 bg-blue-600 text-white flex items-center justify-center font-bold text-xs rounded shadow-sm mr-3">
@@ -488,7 +502,7 @@ export default function App() {
                           onClick={() => handleToggleAppliance(app.id, app.state)}
                           disabled={togglingApplianceId === app.id}
                           className={`relative w-8 h-4 rounded-full transition-colors flex items-center px-0.5 ${
-                            app.state?.toUpperCase() === 'ON' ? 'bg-emerald-500' : 'bg-gray-300'
+                            app.state?.toUpperCase() === 'ON' ? 'bg-[#10b981]' : 'bg-gray-300'
                           } ${togglingApplianceId === app.id ? 'opacity-50' : ''}`}
                         >
                           <div className={`w-3 h-3 bg-white rounded-full transition-transform transform shadow-sm ${

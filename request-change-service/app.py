@@ -174,9 +174,9 @@ def build_confirmation_text(
     return f"{base} Forecast {' | '.join(extras)}."
 
 
-def publish_appliance_state_changed(uid: str, changed_appliances: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
+def publish_appliance_state_changed(uid: str, target_state: str, changed_appliances: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
     names = [str(item.get("name") or item.get("id") or "unknown") for item in changed_appliances]
-    message = f"ApplianceStateChanged: user requested OFF for {', '.join(names)}."
+    message = f"ApplianceStateChanged: user requested {target_state} for {', '.join(names)}."
 
     payload = {
         "user_id": uid,
@@ -261,7 +261,7 @@ def request_change():
 
         history_ack = None
         if changed_appliances:
-            history_ack = publish_appliance_state_changed(uid, changed_appliances)
+            history_ack = publish_appliance_state_changed(uid, target_state, changed_appliances)
 
         return jsonify(
             {

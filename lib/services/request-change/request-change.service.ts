@@ -3,6 +3,7 @@ import {
   fetchService,
   readJsonBody,
 } from "@/lib/clients/service-discovery";
+import { fetchPublicEndpoint } from "@/lib/clients/public-endpoints";
 import { DEMO_UID } from "@/lib/shared/constants";
 
 export interface RequestChangeResult {
@@ -34,6 +35,34 @@ export async function requestChange(params: {
   targetState?: "OFF" | "ON";
 }): Promise<RequestChangeResult> {
   const applianceIds = params.aid ? [params.aid] : undefined;
+  const payload = {
+    uid: params.uid ?? DEMO_UID,
+    appliance_ids: applianceIds,
+    target_state: params.targetState ?? "OFF",
+  };
+
+  const publicResponse = await fetchPublicEndpoint(
+    [
+      "OPENCLAW_REQUEST_CHANGE_URL",
+      "REQUEST_CHANGE_PUBLIC_URL",
+      "OPENCLAW_CHANGE_APPLIANCE_STATE_URL",
+      "CHANGE_APPLIANCE_STATE_PUBLIC_URL",
+    ],
+    {},
+    {
+      method: "POST",
+      body: payload,
+      timeoutMs: 12000,
+    },
+  );
+
+  if (publicResponse) {
+    if (!publicResponse.ok) {
+      throw new Error(await readRequestChangeError(publicResponse));
+    }
+
+    return (await publicResponse.json()) as RequestChangeResult;
+  }
 
   const response = await fetchService(
     "requestchange",
@@ -43,11 +72,7 @@ export async function requestChange(params: {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        uid: params.uid ?? DEMO_UID,
-        appliance_ids: applianceIds,
-        target_state: params.targetState ?? "OFF",
-      }),
+      body: JSON.stringify(payload),
       timeoutMs: 12000,
     },
   );

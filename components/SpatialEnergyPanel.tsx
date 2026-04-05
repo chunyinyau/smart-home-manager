@@ -401,7 +401,7 @@ export default function SpatialEnergyPanel({ appliances: liveAppliances }: Spati
               const isHovered = hoveredApplianceId === appliance.id;
               const Icon = appliance.icon;
               const isOnline = appliance.status === "online";
-              const strokeColor = isOnline ? "#10b981" : "#94a3b8"; 
+              const strokeColor = isOnline ? "#10b981" : "#94a3b8"; // Changed red to emerald-500 equivalent for "ON" consistency
               const dropShadowStyle = isOnline 
                 ? { filter: "drop-shadow(0px 8px 12px rgba(16,185,129,0.4))" }
                 : { filter: "drop-shadow(0px 4px 6px rgba(148,163,184,0.3))" };
@@ -415,6 +415,14 @@ export default function SpatialEnergyPanel({ appliances: liveAppliances }: Spati
                   style={{ transformOrigin: `${appliance.nodePos.cx}px ${appliance.nodePos.cy}px` }}
                 >
                   <polyline points={appliance.linePoints} fill="none" stroke={strokeColor} strokeWidth="2.5" strokeDasharray="6 6" strokeLinecap="round" />
+                    <circle
+                      cx={appliance.nodePos.cx}
+                      cy={appliance.nodePos.cy}
+                      r="36"
+                      fill="none"
+                      stroke={strokeColor}
+                      strokeWidth="2"
+                    />
                   <circle cx={appliance.nodePos.cx} cy={appliance.nodePos.cy} r="28" fill={strokeColor} style={dropShadowStyle} />
                   <g transform={`translate(${appliance.nodePos.cx - 12}, ${appliance.nodePos.cy - 12})`}>
                     <Icon color="white" size={24} />

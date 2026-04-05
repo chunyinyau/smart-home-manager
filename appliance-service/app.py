@@ -15,6 +15,9 @@ DEFAULT_SEED_FILE = Path("/app/seed/appliances.json")
 DEFAULT_TELEMETRY_CSV = Path("/app/data/appliance_energy_data.csv")
 DEFAULT_TELEMETRY_STATE_FILE = Path("/app/data/appliance_telemetry_state.json")
 
+# In-memory dictionary to track manual test overrides
+appliance_overrides = {}
+
 
 def get_cors_origins():
     configured = [
@@ -229,7 +232,15 @@ def sync_appliances_from_telemetry(uid: str) -> None:
             kwh_used = round(float(per_device_accrued.get(profile["watts_key"], 0.0)), 4)
         except (TypeError, ValueError):
             kwh_used = 0.0
+
         state = "ON" if watts > 0 else "OFF"
+
+        if profile["id"] in appliance_overrides:
+            state = appliance_overrides[profile["id"]]
+            if state == "OFF":
+                watts = 0
+            elif state == "ON" and watts == 0:
+                watts = 100
 
         appliance = existing.get(profile["id"])
         if appliance is None:
@@ -319,6 +330,7 @@ def home():
                 "/api/appliance",
                 "/api/appliance/<aid>",
                 "/api/appliance/<aid>/shutdown",
+                "/api/appliance/<aid>/state",
                 "/api/appliance/<aid>/priority",
             ],
         }
@@ -351,8 +363,29 @@ def shutdown_appliance(aid: str):
     if error_response:
         return error_response
 
+    appliance_overrides[aid] = "OFF"
     appliance.state = "OFF"
     appliance.current_watts = 0
+    appliance.last_seen_at = current_timestamp()
+    db.session.commit()
+    return jsonify(appliance.to_dict())
+
+@app.route("/api/appliance/<aid>/state", methods=["PATCH"])
+def update_state(aid: str):
+    appliance, error_response = get_appliance_or_404(aid)
+    if error_response:
+        return error_response
+
+    payload = request.get_json(silent=True) or {}
+    target_state = payload.get("state", "OFF")
+
+    appliance_overrides[aid] = target_state
+    appliance.state = target_state
+    if target_state == "OFF":
+        appliance.current_watts = 0
+    elif target_state == "ON" and appliance.current_watts == 0:
+        appliance.current_watts = 100
+
     appliance.last_seen_at = current_timestamp()
     db.session.commit()
     return jsonify(appliance.to_dict())

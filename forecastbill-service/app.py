@@ -187,28 +187,91 @@ def calculate_days_to_exceed(
     return max(days, 0)
 
 
-def fallback_recommendations(risk_level: str, hdb_type: str) -> list[str]:
-    suffix = f"for HDB type {hdb_type}" if hdb_type else "for your household"
-    if risk_level == "CRITICAL":
+def household_recommendation_tokens(appliances: list[dict[str, Any]]) -> set[str]:
+    tokens: set[str] = set()
+
+    for appliance in appliances:
+        name = str(appliance.get("name") or "").strip().lower()
+        appliance_type = str(appliance.get("type") or "").strip().lower()
+
+        if name:
+            compact_name = "".join(ch for ch in name if ch.isalnum())
+            if compact_name:
+                tokens.add(compact_name)
+
+            for part in name.replace("-", " ").split():
+                compact_part = "".join(ch for ch in part if ch.isalnum())
+                if len(compact_part) >= 4:
+                    tokens.add(compact_part)
+
+        if "tv" in name:
+            tokens.update({"tv", "settopbox"})
+        if "lamp" in name or "light" in name or appliance_type == "lighting":
+            tokens.update({"lamp", "lights", "lighting"})
+        if "air con" in name or "aircon" in name or appliance_type == "cooling":
+            tokens.update({"aircon", "airconditioner", "ac", "cooling"})
+        if "fridge" in name or appliance_type == "essential":
+            tokens.update({"fridge", "refrigerator"})
+        if "panel" in name or appliance_type == "infrastructure":
+            tokens.update({"panel", "smartpanel", "distributionboard"})
+
+    return tokens
+
+
+def filter_recommendations_for_household(
+    recommendations: list[str],
+    appliances: list[dict[str, Any]],
+) -> list[str]:
+    if not recommendations:
+        return []
+
+    tokens = household_recommendation_tokens(appliances)
+    if not tokens:
+        return []
+
+    filtered: list[str] = []
+    for recommendation in recommendations:
+        normalized = "".join(ch for ch in recommendation.lower() if ch.isalnum())
+        if any(token in normalized for token in tokens):
+            filtered.append(recommendation)
+
+    return filtered
+
+
+def fallback_recommendations(
+    risk_level: str,
+    appliances: list[dict[str, Any]],
+) -> list[str]:
+    blocked_types = {"essential", "infrastructure"}
+    candidates = sorted(
+        [
+            appliance
+            for appliance in appliances
+            if str(appliance.get("state") or "").upper() == "ON"
+            and str(appliance.get("type") or "").strip().lower() not in blocked_types
+            and float(appliance.get("currentWatts") or 0) > 0
+        ],
+        key=lambda appliance: -float(appliance.get("currentWatts") or 0),
+    )
+
+    if not candidates:
         return [
-            f"Air conditioner: switch off when room is unoccupied ({suffix}).",
-            "Water heater: keep sessions below 10 minutes and power off after use.",
-            "Clothes dryer: replace with air-drying where possible.",
-            "Desktop/Gaming PC: shut down fully overnight.",
-            "TV and set-top box: turn off at the socket to remove standby draw.",
+            "All controllable appliances are already OFF. Turn appliances back ON only when needed.",
         ]
 
-    if risk_level == "HIGH":
-        return [
-            "Air conditioner: increase setpoint by 1-2C and turn off early.",
-            "Water heater: avoid reheating between back-to-back showers.",
-            "Laundry and cooking: avoid simultaneous high-load appliances.",
-        ]
+    limit = 3 if risk_level == "CRITICAL" else 2 if risk_level == "HIGH" else 1
+    recommendations: list[str] = []
 
-    return [
-        "Maintain current usage pattern; switch off air conditioner when leaving rooms.",
-        "Turn off entertainment devices fully at night to keep standby consumption low.",
-    ]
+    for appliance in candidates[:limit]:
+        name = str(appliance.get("name") or "Appliance")
+        if risk_level == "CRITICAL":
+            recommendations.append(f"{name}: keep OFF as long as possible during this billing window.")
+        elif risk_level == "HIGH":
+            recommendations.append(f"{name}: reduce runtime or switch OFF when not needed.")
+        else:
+            recommendations.append(f"{name}: keep usage efficient to maintain SAFE status.")
+
+    return recommendations
 
 
 def request_with_service_fallback(
@@ -728,7 +791,7 @@ def build_forecast(uid: str, user_id: int, profile_id: str) -> dict[str, Any]:
     )
 
     fallback_risk_level = derive_risk_level(projected_month_end_spend, budget_cap)
-    fallback_recommended = fallback_recommendations(fallback_risk_level, str(profile["hdbType"]))
+    fallback_recommended = fallback_recommendations(fallback_risk_level, appliance_snapshot)
     fallback_assessment = {
         "projectedCost": projected_month_end_spend,
         "projectedKwh": projected_month_end_kwh,
@@ -779,6 +842,7 @@ def build_forecast(uid: str, user_id: int, profile_id: str) -> dict[str, Any]:
     }
 
     assessment = get_ai_assessment(ai_input, fallback_assessment)
+    assessment["recommendedAppliances"] = fallback_recommended
 
     ai_projected_cost = round(float(assessment["projectedCost"]), 2)
     ai_projected_kwh = round(float(assessment["projectedKwh"]), 2)

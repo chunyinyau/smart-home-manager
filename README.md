@@ -278,7 +278,7 @@ The CalculateBill composite service runs as a Flask container on port `5008` and
 Endpoints exposed by the composite service:
 
 - `GET /api/calculatebill/state` - returns in-memory cycle totals per user
-- `POST /api/calculatebill/run` - executes one billing cycle (default 15 minutes)
+- `POST /api/calculatebill/run` - executes one billing cycle (default 5 minutes)
 
 Example run request:
 
@@ -286,7 +286,7 @@ Example run request:
 {
  "user_id": 1,
  "uid": "user_demo_001",
- "interval_minutes": 15,
+ "interval_minutes": 5,
  "sync_budget": true,
  "force_month_close": false
 }

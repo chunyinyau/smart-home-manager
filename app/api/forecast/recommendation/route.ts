@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getForecastRecommendation } from "@/lib/services/forecast/forecast.service";
 import { DEMO_UID } from "@/lib/shared/constants";
 
-const RECOMMENDATION_CACHE_TTL_MS = 360_000;
+const RECOMMENDATION_CACHE_TTL_MS = 10_000;
 const recommendationCache = new Map<string, { expiresAt: number; payload: unknown }>();
 
 export async function GET(request: Request) {

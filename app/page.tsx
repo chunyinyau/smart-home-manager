@@ -47,6 +47,11 @@ type ForecastRecommendationPayload = {
   currentRiskLevel?: "SAFE" | "HIGH" | "CRITICAL";
   predictedRiskLevel?: "SAFE" | "HIGH" | "CRITICAL";
   recommendedDurationMinutes?: number;
+  target?: {
+    requiredSavingsForSafeSgd?: number;
+    remainingSavingsForSafeSgd?: number;
+    met?: boolean;
+  };
   recommendations?: Array<{
     applianceId?: string;
     name?: string;
@@ -60,6 +65,12 @@ type RecommendedActionItem = {
   name: string;
   durationMinutes: number;
   estimatedSavingsSgd?: number;
+};
+
+type ReactivationItem = {
+  applianceId: string;
+  name: string;
+  until?: string | null;
 };
 
 function formatUtcTimestamp(value: string | null | undefined): string {
@@ -107,6 +118,9 @@ export default function App() {
   const [togglingApplianceId, setTogglingApplianceId] = useState<string | null>(null);
   const [forecastRecommendation, setForecastRecommendation] = useState<ForecastRecommendationPayload | null>(null);
   const [applyingActionId, setApplyingActionId] = useState<string | null>(null);
+  const [applyingAllActions, setApplyingAllActions] = useState(false);
+  const [restoringActionId, setRestoringActionId] = useState<string | null>(null);
+  const [restoringAllActions, setRestoringAllActions] = useState(false);
   const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const fetchDashboardData = async (isManual = false) => {
@@ -365,6 +379,10 @@ export default function App() {
   };
 
   const handleApplySuggestedAction = async (action: RecommendedActionItem) => {
+    if (applyingAllActions || restoringAllActions || restoringActionId !== null) {
+      return;
+    }
+
     setApplyingActionId(action.applianceId);
     setActionFeedback(null);
 
@@ -397,6 +415,154 @@ export default function App() {
       setActionFeedback({ type: 'error', message });
     } finally {
       setApplyingActionId(null);
+    }
+  };
+
+  const handleApplyAllSuggestedActions = async (actions: RecommendedActionItem[]) => {
+    if (actions.length === 0) {
+      return;
+    }
+
+    if (restoringAllActions || restoringActionId !== null) {
+      return;
+    }
+
+    setApplyingAllActions(true);
+    setApplyingActionId(null);
+    setActionFeedback(null);
+
+    const uniqueActions = Array.from(
+      new Map(actions.map((item) => [item.applianceId, item])).values(),
+    );
+
+    const appliedNames: string[] = [];
+
+    try {
+      for (const action of uniqueActions) {
+        const response = await fetch('/api/request-change', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            uid: DEMO_UID,
+            aid: action.applianceId,
+            targetState: 'OFF',
+            durationMinutes: action.durationMinutes,
+          }),
+        });
+
+        const payload = await response.json();
+        if (!response.ok || payload?.error) {
+          throw new Error(payload?.error || `HTTP ${response.status}`);
+        }
+
+        appliedNames.push(action.name);
+      }
+
+      await fetchDashboardData(true);
+      setActionFeedback({
+        type: 'success',
+        message: `Applied OFF action for ${appliedNames.join(', ')}.`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to apply all actions';
+      setActionFeedback({ type: 'error', message });
+    } finally {
+      setApplyingAllActions(false);
+    }
+  };
+
+  const handleTurnOnAppliance = async (item: ReactivationItem) => {
+    if (applyingAllActions || restoringAllActions || applyingActionId !== null) {
+      return;
+    }
+
+    setRestoringActionId(item.applianceId);
+    setActionFeedback(null);
+
+    try {
+      const response = await fetch('/api/request-change', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          uid: DEMO_UID,
+          aid: item.applianceId,
+          targetState: 'ON',
+        }),
+      });
+
+      const payload = await response.json();
+      if (!response.ok || payload?.error) {
+        throw new Error(payload?.error || `HTTP ${response.status}`);
+      }
+
+      await fetchDashboardData(true);
+      setActionFeedback({
+        type: 'success',
+        message: `${item.name} turned back ON.`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to turn appliance ON';
+      setActionFeedback({ type: 'error', message });
+    } finally {
+      setRestoringActionId(null);
+    }
+  };
+
+  const handleTurnOnAllAppliances = async (items: ReactivationItem[]) => {
+    if (items.length === 0) {
+      return;
+    }
+
+    if (applyingAllActions || applyingActionId !== null) {
+      return;
+    }
+
+    setRestoringAllActions(true);
+    setRestoringActionId(null);
+    setActionFeedback(null);
+
+    const uniqueItems = Array.from(
+      new Map(items.map((item) => [item.applianceId, item])).values(),
+    );
+
+    const restoredNames: string[] = [];
+
+    try {
+      for (const item of uniqueItems) {
+        const response = await fetch('/api/request-change', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            uid: DEMO_UID,
+            aid: item.applianceId,
+            targetState: 'ON',
+          }),
+        });
+
+        const payload = await response.json();
+        if (!response.ok || payload?.error) {
+          throw new Error(payload?.error || `HTTP ${response.status}`);
+        }
+
+        restoredNames.push(item.name);
+      }
+
+      await fetchDashboardData(true);
+      setActionFeedback({
+        type: 'success',
+        message: `Turned back ON: ${restoredNames.join(', ')}.`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to turn appliances ON';
+      setActionFeedback({ type: 'error', message });
+    } finally {
+      setRestoringAllActions(false);
     }
   };
 
@@ -475,6 +641,22 @@ export default function App() {
         return action;
       })
       .filter((item): item is RecommendedActionItem => item !== null) ?? [];
+  const activeOffOverrideNames =
+    (data?.appliances ?? [])
+      .filter((appliance) => appliance?.manualOverride?.active && appliance?.state?.toUpperCase() === 'OFF')
+      .map((appliance) => appliance.name)
+      .filter((name) => Boolean(name)) ?? [];
+  const reactivationItems: ReactivationItem[] =
+    (data?.appliances ?? [])
+      .filter((appliance) => appliance?.manualOverride?.active && appliance?.state?.toUpperCase() === 'OFF')
+      .map((appliance) => ({
+        applianceId: appliance.id,
+        name: appliance.name,
+        until: appliance.manualOverride?.until,
+      }));
+  const remainingSavingsForSafe = Number(
+    forecastRecommendation?.target?.remainingSavingsForSafeSgd ?? 0,
+  );
 
   return (
     <div className="flex h-screen bg-white text-gray-900 font-sans selection:bg-blue-100 overflow-hidden">
@@ -823,7 +1005,19 @@ export default function App() {
                         ))}
                       </ul>
                     ) : suggestedAppliances.length === 0 ? (
-                      <div className="text-sm text-blue-600/80">No appliance shutdown suggestions available yet.</div>
+                      <div className="space-y-1 text-sm text-blue-700/90">
+                        <p>All controllable appliances are currently OFF, so there is nothing additional to shut down.</p>
+                        {activeOffOverrideNames.length > 0 && (
+                          <p className="text-xs text-blue-600/80">
+                            Active OFF overrides: {activeOffOverrideNames.join(', ')}.
+                          </p>
+                        )}
+                        {remainingSavingsForSafe > 0 && (
+                          <p className="text-xs text-blue-600/80">
+                            Additional savings needed to reach SAFE: ${remainingSavingsForSafe.toFixed(2)}.
+                          </p>
+                        )}
+                      </div>
                     ) : (
                       <ul className="space-y-2">
                         {suggestedAppliances.map((item) => (
@@ -836,6 +1030,21 @@ export default function App() {
 
                     {recommendedActionItems.length > 0 && (
                       <div className="mt-4 space-y-2 border-t border-blue-200 pt-3">
+                        {recommendedActionItems.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleApplyAllSuggestedActions(recommendedActionItems)}
+                            disabled={
+                              applyingAllActions ||
+                              applyingActionId !== null ||
+                              restoringAllActions ||
+                              restoringActionId !== null
+                            }
+                            className="w-full rounded-md bg-blue-700 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-60"
+                          >
+                            {applyingAllActions ? 'Applying All' : `Apply All (${recommendedActionItems.length})`}
+                          </button>
+                        )}
                         {recommendedActionItems.map((item) => (
                           <div
                             key={`${item.applianceId}-${item.durationMinutes}`}
@@ -853,19 +1062,80 @@ export default function App() {
                             <button
                               type="button"
                               onClick={() => handleApplySuggestedAction(item)}
-                              disabled={applyingActionId === item.applianceId}
+                              disabled={
+                                applyingAllActions ||
+                                applyingActionId === item.applianceId ||
+                                restoringAllActions ||
+                                restoringActionId !== null
+                              }
                               className="shrink-0 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
                             >
-                              {applyingActionId === item.applianceId ? 'Applying' : 'Apply'}
+                              {applyingAllActions ? 'Applying' : applyingActionId === item.applianceId ? 'Applying' : 'Apply'}
                             </button>
                           </div>
                         ))}
-                        {actionFeedback && (
-                          <p className={`text-xs font-medium ${actionFeedback.type === 'success' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                            {actionFeedback.message}
-                          </p>
-                        )}
                       </div>
+                    )}
+
+                    {reactivationItems.length > 0 && (
+                      <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div>
+                            <div className="text-xs uppercase tracking-wider text-emerald-700">Restore Appliances</div>
+                            <div className="text-sm font-semibold text-emerald-800">Turn Back ON</div>
+                          </div>
+                        </div>
+                        {reactivationItems.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleTurnOnAllAppliances(reactivationItems)}
+                            disabled={
+                              restoringAllActions ||
+                              restoringActionId !== null ||
+                              applyingAllActions ||
+                              applyingActionId !== null
+                            }
+                            className="mb-2 w-full rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                          >
+                            {restoringAllActions ? 'Turning All On' : `Turn All Back ON (${reactivationItems.length})`}
+                          </button>
+                        )}
+                        <div className="space-y-2">
+                          {reactivationItems.map((item) => (
+                          <div
+                            key={`reactivate-${item.applianceId}`}
+                            className="flex items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-white px-3 py-2"
+                          >
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-semibold text-emerald-800">{item.name}</div>
+                              <div className="text-xs text-emerald-700/80">
+                                Currently OFF due to manual override
+                                {item.until ? ` until ${formatUtcTimestamp(item.until)}` : ''}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleTurnOnAppliance(item)}
+                              disabled={
+                                restoringAllActions ||
+                                restoringActionId === item.applianceId ||
+                                applyingAllActions ||
+                                applyingActionId !== null
+                              }
+                              className="shrink-0 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                            >
+                              {restoringAllActions || restoringActionId === item.applianceId ? 'Turning On' : 'Turn ON'}
+                            </button>
+                          </div>
+                        ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {actionFeedback && (
+                      <p className={`mt-3 text-xs font-medium ${actionFeedback.type === 'success' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {actionFeedback.message}
+                      </p>
                     )}
                   </div>
                 </div>

@@ -164,7 +164,7 @@ def derive_risk_level(projected_month_end_spend: float, budget_cap: float) -> st
         return "CRITICAL"
 
     ratio = projected_month_end_spend / budget_cap
-    if ratio >= 1:
+    if ratio >= 0.9:
         return "CRITICAL"
     if ratio >= 0.85:
         return "HIGH"

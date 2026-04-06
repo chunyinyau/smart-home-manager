@@ -43,8 +43,6 @@ function resolveBaseUrl(defaultUrl, envKeys) {
   return normalizeBaseUrl(defaultUrl);
 }
 
-const DEFAULT_BASE_URL = "http://localhost:3000";
-const baseUrl = resolveBaseUrl(DEFAULT_BASE_URL, ["SMOKE_BASE_URL"]);
 const publicGatewayBaseUrl = resolveBaseUrl("", [
   "SMOKE_PUBLIC_GATEWAY_BASE_URL",
   "OPENCLAW_PUBLIC_BASE_URL",
@@ -119,7 +117,7 @@ const serviceBaseUrls = {
     "CHANGE_STATE_SERVICE_BASE_URL",
     "CHANGE_STATE_SERVICE_URL",
   ]),
-  kong: resolveBaseUrl("http://localhost:8000", [
+  kong: resolveBaseUrl(serviceDefaultUrl(smokeHost, 8000, smokePortOffset), [
     "SMOKE_KONG_BASE_URL",
     "KONG_BASE_URL",
   ]),
@@ -262,18 +260,18 @@ const checks = [
     toleratedStatuses: [],
   },
   {
-    name: "Kong UpdateBudget Root",
+    name: "Kong Forecast Route",
     method: "GET",
-    path: "/updatebudget",
+    path: `/forecast/api/forecast?uid=${encodeURIComponent(historyUserId)}`,
     baseUrl: serviceBaseUrls.kong,
     label: "kong-gateway",
     expectedStatuses: [200],
     toleratedStatuses: [],
   },
   {
-    name: "Kong Request Change Root",
+    name: "Kong Display Route",
     method: "GET",
-    path: "/request-change",
+    path: `/display/api/display?uid=${encodeURIComponent(historyUserId)}&profile_id=1`,
     baseUrl: serviceBaseUrls.kong,
     label: "kong-gateway",
     expectedStatuses: [200],
@@ -549,8 +547,8 @@ async function runUpdateBudgetWorkflowCheck() {
     const validatedDelta = isFiniteNumber(updateBudgetCapDelta) && updateBudgetCapDelta > 0
       ? updateBudgetCapDelta
       : DEFAULT_UPDATEBUDGET_CAP_DELTA;
-    const acceptedCap = roundCurrency(projectedCost + validatedDelta);
-    const rejectedCap = roundCurrency(Math.max(projectedCost - validatedDelta, 0.01));
+    const firstAppliedCap = roundCurrency(projectedCost + validatedDelta);
+    const secondAppliedCap = roundCurrency(Math.max(projectedCost - validatedDelta, 0));
 
     const budgetTarget = `${serviceBaseUrls.budget}/api/budget/${userId}`;
     const beforeBudget = await requestJson(budgetTarget, { method: "GET" });
@@ -567,88 +565,88 @@ async function runUpdateBudgetWorkflowCheck() {
     }
     shouldRestoreBudgetCap = true;
 
-    const acceptedResult = await requestJson(url, {
+    const firstAppliedResult = await requestJson(url, {
       method: "PUT",
       body: JSON.stringify({
-        budget_cap: acceptedCap,
+        budget_cap: firstAppliedCap,
         uid,
         profile_id: String(userId),
       }),
     });
 
-    if (!acceptedResult.response.ok) {
+    if (!firstAppliedResult.response.ok) {
       return fail(
-        `Accepted updatebudget call failed: HTTP ${acceptedResult.response.status} | ${toOneLine(acceptedResult.parsedBody)}`,
-        acceptedResult.response.status,
+        `First updatebudget call failed: HTTP ${firstAppliedResult.response.status} | ${toOneLine(firstAppliedResult.parsedBody)}`,
+        firstAppliedResult.response.status,
       );
     }
 
     if (
-      acceptedResult.parsedBody?.accepted !== true
-      || acceptedResult.parsedBody?.action !== "budget_update_accepted"
-      || acceptedResult.parsedBody?.history?.event !== "BudgetUpdateAccepted"
+      firstAppliedResult.parsedBody?.accepted !== true
+      || firstAppliedResult.parsedBody?.action !== "budget_update_applied"
+      || firstAppliedResult.parsedBody?.history?.event !== "BudgetUpdateAccepted"
     ) {
       return fail(
-        `Accepted response shape mismatch: ${toOneLine(acceptedResult.parsedBody)}`,
-        acceptedResult.response.status,
+        `First update response shape mismatch: ${toOneLine(firstAppliedResult.parsedBody)}`,
+        firstAppliedResult.response.status,
       );
     }
 
-    const afterAcceptedBudget = await requestJson(budgetTarget, { method: "GET" });
-    if (!afterAcceptedBudget.response.ok) {
+    const afterFirstBudget = await requestJson(budgetTarget, { method: "GET" });
+    if (!afterFirstBudget.response.ok) {
       return fail(
-        `Unable to read budget after accepted update: HTTP ${afterAcceptedBudget.response.status} | ${toOneLine(afterAcceptedBudget.parsedBody)}`,
-        afterAcceptedBudget.response.status,
+        `Unable to read budget after first update: HTTP ${afterFirstBudget.response.status} | ${toOneLine(afterFirstBudget.parsedBody)}`,
+        afterFirstBudget.response.status,
       );
     }
 
-    const afterAcceptedCap = readBudgetCap(afterAcceptedBudget.parsedBody);
-    if (!isFiniteNumber(afterAcceptedCap) || Math.abs(afterAcceptedCap - acceptedCap) > 0.01) {
+    const afterFirstCap = readBudgetCap(afterFirstBudget.parsedBody);
+    if (!isFiniteNumber(afterFirstCap) || Math.abs(afterFirstCap - firstAppliedCap) > 0.01) {
       return fail(
-        `Accepted update did not set budget_cap to ${acceptedCap.toFixed(2)} (actual ${String(afterAcceptedCap)}).`,
+        `First update did not set budget_cap to ${firstAppliedCap.toFixed(2)} (actual ${String(afterFirstCap)}).`,
         200,
       );
     }
 
-    const rejectedResult = await requestJson(url, {
+    const secondAppliedResult = await requestJson(url, {
       method: "PUT",
       body: JSON.stringify({
-        budget_cap: rejectedCap,
+        budget_cap: secondAppliedCap,
         uid,
         profile_id: String(userId),
       }),
     });
 
-    if (!rejectedResult.response.ok) {
+    if (!secondAppliedResult.response.ok) {
       return fail(
-        `Rejected updatebudget call failed: HTTP ${rejectedResult.response.status} | ${toOneLine(rejectedResult.parsedBody)}`,
-        rejectedResult.response.status,
+        `Second updatebudget call failed: HTTP ${secondAppliedResult.response.status} | ${toOneLine(secondAppliedResult.parsedBody)}`,
+        secondAppliedResult.response.status,
       );
     }
 
     if (
-      rejectedResult.parsedBody?.accepted !== false
-      || rejectedResult.parsedBody?.action !== "budget_update_rejected"
-      || rejectedResult.parsedBody?.history?.event !== "BudgetUpdateRejected"
+      secondAppliedResult.parsedBody?.accepted !== false
+      || secondAppliedResult.parsedBody?.action !== "budget_update_rejected"
+      || secondAppliedResult.parsedBody?.history?.event !== "BudgetUpdateRejected"
     ) {
       return fail(
-        `Rejected response shape mismatch: ${toOneLine(rejectedResult.parsedBody)}`,
-        rejectedResult.response.status,
+        `Second update response shape mismatch: ${toOneLine(secondAppliedResult.parsedBody)}`,
+        secondAppliedResult.response.status,
       );
     }
 
-    const afterRejectedBudget = await requestJson(budgetTarget, { method: "GET" });
-    if (!afterRejectedBudget.response.ok) {
+    const afterSecondBudget = await requestJson(budgetTarget, { method: "GET" });
+    if (!afterSecondBudget.response.ok) {
       return fail(
-        `Unable to read budget after rejected update: HTTP ${afterRejectedBudget.response.status} | ${toOneLine(afterRejectedBudget.parsedBody)}`,
-        afterRejectedBudget.response.status,
+        `Unable to read budget after second update: HTTP ${afterSecondBudget.response.status} | ${toOneLine(afterSecondBudget.parsedBody)}`,
+        afterSecondBudget.response.status,
       );
     }
 
-    const afterRejectedCap = readBudgetCap(afterRejectedBudget.parsedBody);
-    if (!isFiniteNumber(afterRejectedCap) || Math.abs(afterRejectedCap - afterAcceptedCap) > 0.01) {
+    const afterSecondCap = readBudgetCap(afterSecondBudget.parsedBody);
+    if (!isFiniteNumber(afterSecondCap) || Math.abs(afterSecondCap - firstAppliedCap) > 0.01) {
       return fail(
-        `Rejected update unexpectedly changed budget_cap (after accepted ${afterAcceptedCap}, after rejected ${String(afterRejectedCap)}).`,
+        `Second update should be rejected and keep budget_cap at ${firstAppliedCap.toFixed(2)} (actual ${String(afterSecondCap)}).`,
         200,
       );
     }
@@ -668,19 +666,19 @@ async function runUpdateBudgetWorkflowCheck() {
     }
 
     const rows = Array.isArray(historyResult.parsedBody) ? historyResult.parsedBody : [];
-    const acceptedSignature = `BudgetUpdateAccepted: requested budget_cap $${acceptedCap.toFixed(2)};`;
-    const rejectedSignature = `BudgetUpdateRejected: requested budget_cap $${rejectedCap.toFixed(2)};`;
+    const firstAppliedSignature = `BudgetUpdateAccepted: requested budget_cap $${firstAppliedCap.toFixed(2)};`;
+    const secondAppliedSignature = `BudgetUpdateRejected: requested budget_cap $${secondAppliedCap.toFixed(2)};`;
 
-    const hasAcceptedLog = rows.some(
-      (row) => row && typeof row.message === "string" && row.message.includes(acceptedSignature),
+    const hasFirstAppliedLog = rows.some(
+      (row) => row && typeof row.message === "string" && row.message.includes(firstAppliedSignature),
     );
-    const hasRejectedLog = rows.some(
-      (row) => row && typeof row.message === "string" && row.message.includes(rejectedSignature),
+    const hasSecondAppliedLog = rows.some(
+      (row) => row && typeof row.message === "string" && row.message.includes(secondAppliedSignature),
     );
 
-    if (!hasAcceptedLog || !hasRejectedLog) {
+    if (!hasFirstAppliedLog || !hasSecondAppliedLog) {
       return fail(
-        `History log signatures not found (accepted=${String(hasAcceptedLog)}, rejected=${String(hasRejectedLog)}).`,
+        `History log signatures not found (first=${String(hasFirstAppliedLog)}, second=${String(hasSecondAppliedLog)}).`,
         200,
       );
     }
@@ -696,8 +694,8 @@ async function runUpdateBudgetWorkflowCheck() {
       status: 200,
       elapsedMs: Date.now() - started,
       detail:
-        `projected=${projectedCost.toFixed(2)}, acceptedCap=${acceptedCap.toFixed(2)}, `
-        + `rejectedCap=${rejectedCap.toFixed(2)}, afterAccepted=${afterAcceptedCap.toFixed(2)}, afterRejected=${afterRejectedCap.toFixed(2)}`,
+        `projected=${projectedCost.toFixed(2)}, firstCap=${firstAppliedCap.toFixed(2)}, `
+        + `secondCap=${secondAppliedCap.toFixed(2)} (expected reject), afterFirst=${afterFirstCap.toFixed(2)}, afterSecond=${afterSecondCap.toFixed(2)}`,
     };
   } catch (error) {
     return fail(error instanceof Error ? error.message : String(error));

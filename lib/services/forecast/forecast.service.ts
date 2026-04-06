@@ -22,7 +22,38 @@ export interface ForecastRecommendation {
     priority?: number;
     suggestedDurationMinutes?: number;
     estimatedSavingsSgd?: number;
+    aiScore?: number;
+    aiDurationMultiplier?: number;
   }>;
+  target?: {
+    targetRiskLevel?: string;
+    requiredSavingsForSafeSgd?: number;
+    remainingSavingsForSafeSgd?: number;
+    requiredSavingsForSafetyNetSgd?: number;
+    remainingSavingsForSafetyNetSgd?: number;
+    safeThresholdRatio?: number;
+    safeMinimumBudgetCap?: number;
+    targetSafetyThresholdRatio?: number;
+    met?: boolean;
+    metSafetyNet?: boolean;
+    feasibilityStatus?: "achievable" | "stretch" | "not_achievable";
+    feasibilityGapSgd?: number;
+    maxPotentialSavingsSgd?: number;
+    conservativePotentialSavingsSgd?: number;
+    easyPotentialSavingsSgd?: number;
+    feasibleMinBudgetCap?: number;
+    nearestFeasibleBudgetCap?: number;
+    recommendedBudgetCapRange?: {
+      low?: number;
+      high?: number;
+    };
+  };
+  aiPlanner?: {
+    used?: boolean;
+    model?: string;
+    reason?: string;
+    candidateCount?: number;
+  };
   aiHints?: string[];
   strategy?: string;
 }

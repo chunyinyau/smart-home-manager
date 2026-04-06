@@ -185,9 +185,9 @@ def request_with_fallback(
 
 def resolve_budget_cap(body: dict[str, Any]) -> float:
     raw_budget_cap = body.get("budget_cap", body.get("monthlyCap"))
-    parsed = parse_positive_float(raw_budget_cap)
+    parsed = parse_non_negative_float(raw_budget_cap)
     if parsed is None:
-        raise ValueError("budget_cap (or monthlyCap) must be a positive number")
+        raise ValueError("budget_cap (or monthlyCap) must be a number >= 0")
     return round(parsed, 2)
 
 
@@ -340,9 +340,9 @@ def process_update_budget(user_id: int, body: dict[str, Any]) -> tuple[dict[str,
     forecast, projected_monthly_spend = run_forecast(user_id, uid, profile_id)
 
     accepted = requested_budget_cap >= projected_monthly_spend
-    action = "budget_update_accepted" if accepted else "budget_update_rejected"
+    action = "budget_update_applied" if accepted else "budget_update_rejected"
 
-    budget_data = None
+    budget_data: Optional[dict[str, Any]] = None
     if accepted:
         budget_data = update_budget_cap(user_id, requested_budget_cap)
 
@@ -354,9 +354,13 @@ def process_update_budget(user_id: int, body: dict[str, Any]) -> tuple[dict[str,
     )
 
     message = (
-        f"Budget update accepted. New budget cap ${requested_budget_cap:.2f} covers projected spend ${projected_monthly_spend:.2f}."
+        f"Budget update applied. New budget cap ${requested_budget_cap:.2f}. "
+        f"Current projected spend is ${projected_monthly_spend:.2f}."
         if accepted
-        else f"Budget update rejected. Requested cap ${requested_budget_cap:.2f} is below projected spend ${projected_monthly_spend:.2f}."
+        else (
+            f"Budget update rejected. Requested cap ${requested_budget_cap:.2f} is below "
+            f"projected month-end spend ${projected_monthly_spend:.2f}."
+        )
     )
 
     payload: dict[str, Any] = {

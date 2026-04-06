@@ -20,6 +20,9 @@ try:
 except Exception:
     run_forecast_check = None
 
+from feasibility_policy import classify_feasibility
+from recommendation_planner import get_ai_recommendation_adjustments
+
 
 BILL_SERVICE_URL = os.getenv("BILL_SERVICE_URL", "http://bill_service:5003")
 BUDGET_SERVICE_URL = os.getenv("BUDGET_SERVICE_URL", "http://budget_service:5004")
@@ -34,6 +37,15 @@ DEFAULT_FORECAST_UID = os.getenv("DEFAULT_FORECAST_UID", "user_demo_001")
 DEFAULT_PROFILE_ID = os.getenv("DEFAULT_PROFILE_ID", "1")
 DEFAULT_HDB_TYPE = os.getenv("DEFAULT_HDB_TYPE", "4")
 DEFAULT_BASELINE_MONTHLY_KWH = float(os.getenv("DEFAULT_BASELINE_MONTHLY_KWH", "350"))
+RECOMMENDATION_TARGET_BUFFER_RATIO = min(
+    max(float(os.getenv("RECOMMENDATION_TARGET_BUFFER_RATIO", "0.03")), 0.0),
+    0.1,
+)
+RECOMMENDATION_SAFETY_NET_MULTIPLIER = max(
+    float(os.getenv("RECOMMENDATION_SAFETY_NET_MULTIPLIER", "1.15")),
+    1.0,
+)
+RECOMMENDATION_MIN_BUFFER_SGD = max(float(os.getenv("RECOMMENDATION_MIN_BUFFER_SGD", "1.0")), 0.0)
 SGT_TZ = ZoneInfo("Asia/Singapore")
 
 SERVICE_FALLBACK_URLS = {
@@ -353,7 +365,7 @@ def fetch_budget_snapshot(user_id: int) -> tuple[float, float]:
     budget_cap = parse_float(data.get("budget_cap"))
     last_month_cumulative_bill = parse_float(data.get("cum_bill"))
 
-    if budget_cap is None or budget_cap <= 0:
+    if budget_cap is None or budget_cap < 0:
         raise RuntimeError("budget-service budget_cap is invalid")
 
     if last_month_cumulative_bill is None:
@@ -687,10 +699,10 @@ def normalize_ai_assessment(payload: Any, fallback: dict[str, Any]) -> dict[str,
     return normalized
 
 
-def resolve_picoclaw_api_key() -> str:
-    api_key = os.getenv("PICOCLAW_API_KEY")
-    if api_key:
-        return api_key
+def resolve_picoclaw_api_key() -> Optional[str]:
+    api_key = os.getenv("PICOCLAW_API_KEY") or os.getenv("OPENAI_API_KEY")
+    if isinstance(api_key, str) and api_key.strip():
+        return api_key.strip()
 
     return None
 
@@ -1002,29 +1014,6 @@ def build_recommendation_plan(uid: str, user_id: int, profile_id: str) -> dict[s
 
     risk_level = str(forecast.get("riskLevel") or "SAFE").upper()
 
-    if risk_level == "SAFE":
-        projected_cost = float(forecast.get("projectedCost") or 0)
-        return {
-            "uid": uid,
-            "userId": user_id,
-            "generatedAt": iso_sgt_now(),
-            "currentRiskLevel": risk_level,
-            "predictedRiskLevel": "SAFE",
-            "currentProjectedCost": round(projected_cost, 2),
-            "projectedCostAfterPlan": round(projected_cost, 2),
-            "estimatedTotalSavingsSgd": 0.0,
-            "recommendedDurationMinutes": 0,
-            "recommendations": [],
-            "target": {
-                "targetRiskLevel": "SAFE",
-                "requiredSavingsForSafeSgd": 0.0,
-                "remainingSavingsForSafeSgd": 0.0,
-                "met": True,
-            },
-            "aiHints": forecast.get("recommendations") or forecast.get("recommendedAppliances") or [],
-            "strategy": "no-action-safe",
-        }
-
     blocked_types = {"essential", "infrastructure"}
     blocked_name_tokens = {"fridge", "refrigerator", "smart panel", "main panel", "distribution board"}
     min_watts_for_shutdown = 50.0
@@ -1053,15 +1042,63 @@ def build_recommendation_plan(uid: str, user_id: int, profile_id: str) -> dict[s
         "HIGH": 2,
         "SAFE": 1,
     }
+    max_devices_with_safety_net_by_risk = {
+        "CRITICAL": 5,
+        "HIGH": 4,
+        "SAFE": 2,
+    }
     max_duration_by_risk = {
-        "CRITICAL": 720,
-        "HIGH": 360,
-        "SAFE": 90,
+        "CRITICAL": 1440,
+        "HIGH": 720,
+        "SAFE": 180,
     }
 
     duration_minutes = min_duration_by_risk.get(risk_level, 30)
     max_devices = max_devices_by_risk.get(risk_level, 1)
     max_duration_minutes = max_duration_by_risk.get(risk_level, 1440)
+
+    def max_duration_for_appliance(appliance: dict[str, Any]) -> int:
+        appliance_type = str(appliance.get("type") or "").strip().lower()
+        priority = int(appliance.get("priority") or 99)
+        cap = max_duration_minutes
+
+        # Keep long-duration actions justifiable by limiting sensitive loads.
+        if appliance_type == "cooling":
+            cap = min(cap, 720 if risk_level == "CRITICAL" else 540)
+        elif appliance_type == "lighting":
+            cap = min(cap, 960)
+
+        if priority <= 1:
+            cap = min(cap, 480 if risk_level == "CRITICAL" else 360)
+        elif priority == 2:
+            cap = min(cap, 720 if risk_level == "CRITICAL" else 540)
+
+        return max(30, cap)
+
+    price_per_kwh = float(((forecast.get("rate") or {}).get("pricePerKwh") or 0) or 0)
+    projected_cost = float(forecast.get("projectedCost") or 0)
+    budget_cap = float(((forecast.get("budget") or {}).get("budgetCap") or 0) or 0)
+
+    safe_threshold_ratio = 0.85
+    target_threshold_ratio = max(safe_threshold_ratio - RECOMMENDATION_TARGET_BUFFER_RATIO, 0.7)
+    safe_ratio = safe_threshold_ratio if safe_threshold_ratio > 0 else 0.85
+    safe_minimum_budget_cap = max((projected_cost + 0.01) / safe_ratio, 0.0)
+
+    safe_target_cost = (budget_cap * safe_threshold_ratio) - 0.01 if budget_cap > 0 else projected_cost
+    target_cost_with_safety_net = (
+        (budget_cap * target_threshold_ratio) - 0.01 if budget_cap > 0 else projected_cost
+    )
+
+    required_savings_for_safe = 0.0
+    required_savings_for_safety_net = 0.0
+    if risk_level in {"HIGH", "CRITICAL"}:
+        required_savings_for_safe = max(projected_cost - safe_target_cost, 0.0)
+        required_savings_for_safety_net = max(projected_cost - target_cost_with_safety_net, 0.0)
+        required_savings_for_safety_net = max(
+            required_savings_for_safety_net,
+            required_savings_for_safe * RECOMMENDATION_SAFETY_NET_MULTIPLIER,
+            required_savings_for_safe + RECOMMENDATION_MIN_BUFFER_SGD,
+        )
 
     recommendable_active = [
         appliance
@@ -1077,67 +1114,153 @@ def build_recommendation_plan(uid: str, user_id: int, profile_id: str) -> dict[s
             if is_shutdown_recommendable(appliance, 1.0)
         ]
 
+    feasibility = classify_feasibility(
+        projected_cost=projected_cost,
+        budget_cap=budget_cap,
+        safe_threshold_ratio=safe_threshold_ratio,
+        required_savings_for_safe=required_savings_for_safe,
+        price_per_kwh=price_per_kwh,
+        recommendable_active=recommendable_active,
+        max_duration_minutes=max_duration_minutes,
+        target_threshold_ratio=target_threshold_ratio,
+        required_savings_for_target=required_savings_for_safety_net,
+    )
+
+    if risk_level == "SAFE":
+        return {
+            "uid": uid,
+            "userId": user_id,
+            "generatedAt": iso_sgt_now(),
+            "currentRiskLevel": risk_level,
+            "predictedRiskLevel": "SAFE",
+            "currentProjectedCost": round(projected_cost, 2),
+            "projectedCostAfterPlan": round(projected_cost, 2),
+            "estimatedTotalSavingsSgd": 0.0,
+            "recommendedDurationMinutes": 0,
+            "recommendations": [],
+            "target": {
+                "targetRiskLevel": "SAFE",
+                "requiredSavingsForSafeSgd": 0.0,
+                "remainingSavingsForSafeSgd": 0.0,
+                "requiredSavingsForSafetyNetSgd": 0.0,
+                "remainingSavingsForSafetyNetSgd": 0.0,
+                "safeThresholdRatio": round(safe_ratio, 4),
+                "safeMinimumBudgetCap": round(safe_minimum_budget_cap, 2),
+                "targetSafetyThresholdRatio": round(target_threshold_ratio, 4),
+                "met": True,
+                "metSafetyNet": True,
+                "feasibilityStatus": feasibility["status"],
+                "feasibleWithCurrentBudget": feasibility["feasibleWithCurrentBudget"],
+                "maxPotentialSavingsSgd": feasibility["maxPotentialSavingsSgd"],
+                "conservativePotentialSavingsSgd": feasibility["conservativePotentialSavingsSgd"],
+                "easyPotentialSavingsSgd": feasibility["easyPotentialSavingsSgd"],
+                "feasibilityGapSgd": feasibility["feasibilityGapSgd"],
+                "feasibleMinBudgetCap": feasibility["feasibleMinBudgetCap"],
+                "nearestFeasibleBudgetCap": feasibility["nearestFeasibleBudgetCap"],
+                "recommendedBudgetCapRange": feasibility["recommendedBudgetCapRange"],
+            },
+            "aiHints": forecast.get("recommendations") or forecast.get("recommendedAppliances") or [],
+            "strategy": "no-action-safe-feasibility-aware",
+        }
+
+    ai_planner = get_ai_recommendation_adjustments(
+        uid=uid,
+        risk_level=risk_level,
+        projected_cost=projected_cost,
+        budget_cap=budget_cap,
+        required_savings_for_safe=required_savings_for_safety_net,
+        price_per_kwh=price_per_kwh,
+        max_devices=max_devices,
+        default_duration_minutes=duration_minutes,
+        candidates=recommendable_active,
+    )
+    ai_scores = ai_planner.get("scores") if isinstance(ai_planner.get("scores"), dict) else {}
+    ai_duration_multipliers = (
+        ai_planner.get("durationMultipliers")
+        if isinstance(ai_planner.get("durationMultipliers"), dict)
+        else {}
+    )
+
     ranked = sorted(
         recommendable_active,
         key=lambda appliance: (
+            -float(ai_scores.get(str(appliance.get("id") or ""), -1.0)),
             -float(appliance.get("currentWatts") or 0),
             int(appliance.get("priority") or 99),
         ),
     )
-    selected = ranked[:max_devices]
 
-    price_per_kwh = float(((forecast.get("rate") or {}).get("pricePerKwh") or 0) or 0)
-    projected_cost = float(forecast.get("projectedCost") or 0)
-    budget_cap = float(((forecast.get("budget") or {}).get("budgetCap") or 0) or 0)
+    selected: list[dict[str, Any]] = []
+    selected_max_potential = 0.0
+    max_devices_with_safety_net = max_devices_with_safety_net_by_risk.get(risk_level, max_devices)
 
-    safe_threshold_ratio = 0.85
-    safe_target_cost = (budget_cap * safe_threshold_ratio) - 0.01 if budget_cap > 0 else projected_cost
-    required_savings_for_safe = 0.0
-    if risk_level in {"HIGH", "CRITICAL"}:
-        required_savings_for_safe = max(projected_cost - safe_target_cost, 0.0)
+    for appliance in ranked:
+        if len(selected) >= max_devices_with_safety_net:
+            break
+
+        selected.append(appliance)
+        watts = max(0.0, float(appliance.get("currentWatts") or 0))
+        appliance_cap_minutes = max_duration_for_appliance(appliance)
+        selected_max_potential += ((watts * (appliance_cap_minutes / 60.0)) / 1000.0) * price_per_kwh
+
+        # Keep at least the default count, then include extra only if safety-net savings are still short.
+        if len(selected) >= max_devices and selected_max_potential >= required_savings_for_safety_net:
+            break
 
     plan_items: list[dict[str, Any]] = []
     total_savings = 0.0
-    remaining_savings_for_safe = required_savings_for_safe
+    remaining_savings_for_plan = required_savings_for_safety_net
 
     for appliance in selected:
+        appliance_id = str(appliance.get("id") or "")
         watts = max(0.0, float(appliance.get("currentWatts") or 0))
         if watts <= 0:
             continue
+        appliance_max_duration_minutes = max_duration_for_appliance(appliance)
 
         savings_per_minute = 0.0
         if price_per_kwh > 0:
             savings_per_minute = ((watts / 1000.0) * price_per_kwh) / 60.0
 
         suggested_duration_minutes = duration_minutes + cron_gap_buffer_minutes
-        if remaining_savings_for_safe > 0 and savings_per_minute > 0:
-            required_minutes = int((remaining_savings_for_safe / savings_per_minute) + 0.9999)
+        if remaining_savings_for_plan > 0 and savings_per_minute > 0:
+            required_minutes = int((remaining_savings_for_plan / savings_per_minute) + 0.9999)
             required_minutes += cron_gap_buffer_minutes
             suggested_duration_minutes = max(suggested_duration_minutes, required_minutes)
 
-        suggested_duration_minutes = max(1, min(suggested_duration_minutes, max_duration_minutes))
+        duration_multiplier = parse_float(ai_duration_multipliers.get(appliance_id))
+        if duration_multiplier is not None:
+            suggested_duration_minutes = int((suggested_duration_minutes * duration_multiplier) + 0.9999)
+
+        suggested_duration_minutes = max(1, min(suggested_duration_minutes, appliance_max_duration_minutes))
 
         saved_kwh = (watts * (suggested_duration_minutes / 60.0)) / 1000.0
         saved_sgd = round(saved_kwh * price_per_kwh, 4)
         total_savings += saved_sgd
-        remaining_savings_for_safe = max(required_savings_for_safe - total_savings, 0.0)
+        remaining_savings_for_plan = max(required_savings_for_safety_net - total_savings, 0.0)
 
-        plan_items.append(
-            {
-                "applianceId": appliance.get("id"),
-                "name": appliance.get("name"),
-                "currentWatts": int(watts),
-                "priority": appliance.get("priority"),
-                "suggestedDurationMinutes": suggested_duration_minutes,
-                "estimatedSavingsSgd": saved_sgd,
-            }
-        )
+        plan_item = {
+            "applianceId": appliance_id,
+            "name": appliance.get("name"),
+            "currentWatts": int(watts),
+            "priority": appliance.get("priority"),
+            "suggestedDurationMinutes": suggested_duration_minutes,
+            "estimatedSavingsSgd": saved_sgd,
+        }
+        ai_score = parse_float(ai_scores.get(appliance_id))
+        if ai_score is not None:
+            plan_item["aiScore"] = round(ai_score, 2)
+        if duration_multiplier is not None:
+            plan_item["aiDurationMultiplier"] = round(duration_multiplier, 3)
 
-        if remaining_savings_for_safe <= 0 and risk_level in {"HIGH", "CRITICAL"}:
+        plan_items.append(plan_item)
+
+        if remaining_savings_for_plan <= 0 and risk_level in {"HIGH", "CRITICAL"}:
             break
 
     adjusted_projected_cost = round(max(projected_cost - total_savings, 0.0), 2)
     predicted_risk = derive_risk_level(adjusted_projected_cost, budget_cap)
+    remaining_savings_for_safe = max(required_savings_for_safe - total_savings, 0.0)
     recommended_duration_minutes = max(
         (int(item.get("suggestedDurationMinutes") or duration_minutes) for item in plan_items),
         default=duration_minutes,
@@ -1158,17 +1281,42 @@ def build_recommendation_plan(uid: str, user_id: int, profile_id: str) -> dict[s
             "targetRiskLevel": "SAFE",
             "requiredSavingsForSafeSgd": round(required_savings_for_safe, 4),
             "remainingSavingsForSafeSgd": round(remaining_savings_for_safe, 4),
+            "requiredSavingsForSafetyNetSgd": round(required_savings_for_safety_net, 4),
+            "remainingSavingsForSafetyNetSgd": round(remaining_savings_for_plan, 4),
+            "safeThresholdRatio": round(safe_ratio, 4),
+            "safeMinimumBudgetCap": round(safe_minimum_budget_cap, 2),
+            "targetSafetyThresholdRatio": round(target_threshold_ratio, 4),
             "met": predicted_risk == "SAFE",
+            "metSafetyNet": remaining_savings_for_plan <= 0,
+            "feasibilityStatus": feasibility["status"],
+            "feasibleWithCurrentBudget": feasibility["feasibleWithCurrentBudget"],
+            "maxPotentialSavingsSgd": feasibility["maxPotentialSavingsSgd"],
+            "conservativePotentialSavingsSgd": feasibility["conservativePotentialSavingsSgd"],
+            "easyPotentialSavingsSgd": feasibility["easyPotentialSavingsSgd"],
+            "feasibilityGapSgd": feasibility["feasibilityGapSgd"],
+            "feasibleMinBudgetCap": feasibility["feasibleMinBudgetCap"],
+            "nearestFeasibleBudgetCap": feasibility["nearestFeasibleBudgetCap"],
+            "recommendedBudgetCapRange": feasibility["recommendedBudgetCapRange"],
+        },
+        "aiPlanner": {
+            "used": bool(ai_planner.get("used")),
+            "model": ai_planner.get("model"),
+            "reason": ai_planner.get("reason"),
+            "candidateCount": ai_planner.get("candidateCount", 0),
         },
         "aiHints": forecast.get("recommendations") or forecast.get("recommendedAppliances") or [],
         "strategy": (
-            "adaptive-safe-target-with-ai-hints-low-watt-fallback"
-            if not [
-                appliance
-                for appliance in active
-                if is_shutdown_recommendable(appliance, min_watts_for_shutdown)
-            ]
-            else "adaptive-safe-target-with-ai-hints"
+            "ai-ranked-feasibility-aware-target"
+            if bool(ai_planner.get("used"))
+            else (
+                "feasibility-aware-target-low-watt-fallback"
+                if not [
+                    appliance
+                    for appliance in active
+                    if is_shutdown_recommendable(appliance, min_watts_for_shutdown)
+                ]
+                else "feasibility-aware-target"
+            )
         ),
     }
 

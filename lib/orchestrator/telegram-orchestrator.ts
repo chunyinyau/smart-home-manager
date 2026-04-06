@@ -5,7 +5,6 @@ import {
   getForecastRecommendation,
 } from "@/lib/services/forecast/forecast.service";
 import { getHistory } from "@/lib/services/history/history.service";
-import { logHistory } from "@/lib/services/history/history.service";
 import { getUserProfile } from "@/lib/services/profile/profile.service";
 import { getRate } from "@/lib/services/rate/rate.service";
 import {
@@ -163,7 +162,11 @@ async function getBudgetStatus(userId: number) {
   return payload?.data ?? null;
 }
 
-async function updateMonthlyCap(userId: number, monthlyCap: number) {
+async function updateMonthlyCap(
+  userId: number,
+  monthlyCap: number,
+  uid: string,
+): Promise<UpdateBudgetPayload> {
   const roundedMonthlyCap = Number(monthlyCap.toFixed(2));
   const publicUrl = resolvePublicEndpointUrl(
     ["OPENCLAW_UPDATE_BUDGET_URL", "UPDATE_BUDGET_PUBLIC_URL"],
@@ -189,58 +192,40 @@ async function updateMonthlyCap(userId: number, monthlyCap: number) {
       throw new Error("Public update budget endpoint is not configured");
     }
 
-    const payload = await readJsonBody<BudgetServicePayload>(response);
+    const payload = (await readJsonBody<UpdateBudgetPayload>(response)) ?? {};
 
-    if (!response.ok || payload?.success === false) {
+    if (!response.ok || payload.success === false) {
       throw new Error(
         extractErrorMessage(payload, `Update budget endpoint returned HTTP ${response.status}`),
       );
     }
 
-    return payload?.data ?? payload ?? null;
+    return payload;
   }
 
-  const response = await fetchService("budget", `/api/budget/${userId}/cap`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ budget_cap: roundedMonthlyCap }),
-  });
-  const payload = await readJsonBody<BudgetServicePayload>(response);
-
-  if (!response.ok || payload?.success === false) {
-    throw new Error(
-      extractErrorMessage(payload, `Budget service returned HTTP ${response.status}`),
-    );
-  }
-
-  return payload?.data ?? null;
-}
-
-async function syncLatestBilling(userId: number, uid: string) {
-  const response = await fetchService("calculatebill", "/api/calculatebill/run", {
-    method: "POST",
+  const response = await fetchService("updatebudget", `/api/updatebudget/${userId}`, {
+    method: "PUT",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      user_id: userId,
       uid,
-      interval_minutes: 5,
-      sync_budget: true,
+      user_id: userId,
+      profile_id: userId,
+      budget_cap: roundedMonthlyCap,
+      monthlyCap: roundedMonthlyCap,
     }),
-    timeoutMs: 12000,
+    timeoutMs: 15000,
   });
-  const payload = await readJsonBody<UpdateBudgetPayload>(response);
+  const payload = (await readJsonBody<UpdateBudgetPayload>(response)) ?? {};
 
   if (!response.ok || payload?.success === false) {
     throw new Error(
-      extractErrorMessage(payload, `CalculateBill service returned HTTP ${response.status}`),
+      extractErrorMessage(payload, `UpdateBudget service returned HTTP ${response.status}`),
     );
   }
 
-  return payload?.data ?? null;
+  return payload;
 }
 
 export async function handleTelegramIntent(
@@ -301,29 +286,28 @@ export async function handleTelegramIntent(
       return { error: "monthlyCap must be 0 or greater." };
     }
 
-    const billingSync = await syncLatestBilling(userId, uid);
-    const forecast = await getForecast(uid);
-    const projectedMonthlySpend = Number(forecast.projectedCost ?? 0);
-
-    const budget = await updateMonthlyCap(userId, requestedMonthlyCap);
-    const refreshedForecast = await getForecast(uid);
-    const message = `Budget updated to $${requestedMonthlyCap.toFixed(2)}. Current projected spend is $${projectedMonthlySpend.toFixed(2)}.`;
-
-    try {
-      await logHistory(uid, message);
-    } catch (error) {
-      console.warn("History logging failed after set_budget intent:", error);
-    }
-
+    const result = await updateMonthlyCap(userId, requestedMonthlyCap, uid);
     return {
-      accepted: true,
-      action: "budget_update_applied",
-      requestedMonthlyCap,
-      projectedMonthlySpend,
-      forecast: refreshedForecast,
-      billingSync,
-      budget,
-      message,
+      accepted: result.accepted === true,
+      action: result.action,
+      requestedMonthlyCap:
+        typeof result.requestedMonthlyCap === "number"
+          ? result.requestedMonthlyCap
+          : requestedMonthlyCap,
+      projectedMonthlySpend:
+        typeof result.projectedMonthlySpend === "number"
+          ? result.projectedMonthlySpend
+          : Number.NaN,
+      forecast: result.forecast,
+      billingSync: result.billingSync,
+      budget: result.budget,
+      history: result.history,
+      message:
+        typeof result.message === "string" && result.message.trim().length > 0
+          ? result.message
+          : result.accepted
+            ? "Budget update applied."
+            : "Budget update rejected.",
     };
   }
 

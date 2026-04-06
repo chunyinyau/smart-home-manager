@@ -625,9 +625,9 @@ async function runUpdateBudgetWorkflowCheck() {
     }
 
     if (
-      secondAppliedResult.parsedBody?.accepted !== true
-      || secondAppliedResult.parsedBody?.action !== "budget_update_applied"
-      || secondAppliedResult.parsedBody?.history?.event !== "BudgetUpdateAccepted"
+      secondAppliedResult.parsedBody?.accepted !== false
+      || secondAppliedResult.parsedBody?.action !== "budget_update_rejected"
+      || secondAppliedResult.parsedBody?.history?.event !== "BudgetUpdateRejected"
     ) {
       return fail(
         `Second update response shape mismatch: ${toOneLine(secondAppliedResult.parsedBody)}`,
@@ -644,9 +644,9 @@ async function runUpdateBudgetWorkflowCheck() {
     }
 
     const afterSecondCap = readBudgetCap(afterSecondBudget.parsedBody);
-    if (!isFiniteNumber(afterSecondCap) || Math.abs(afterSecondCap - secondAppliedCap) > 0.01) {
+    if (!isFiniteNumber(afterSecondCap) || Math.abs(afterSecondCap - firstAppliedCap) > 0.01) {
       return fail(
-        `Second update did not set budget_cap to ${secondAppliedCap.toFixed(2)} (actual ${String(afterSecondCap)}).`,
+        `Second update should be rejected and keep budget_cap at ${firstAppliedCap.toFixed(2)} (actual ${String(afterSecondCap)}).`,
         200,
       );
     }
@@ -667,7 +667,7 @@ async function runUpdateBudgetWorkflowCheck() {
 
     const rows = Array.isArray(historyResult.parsedBody) ? historyResult.parsedBody : [];
     const firstAppliedSignature = `BudgetUpdateAccepted: requested budget_cap $${firstAppliedCap.toFixed(2)};`;
-    const secondAppliedSignature = `BudgetUpdateAccepted: requested budget_cap $${secondAppliedCap.toFixed(2)};`;
+    const secondAppliedSignature = `BudgetUpdateRejected: requested budget_cap $${secondAppliedCap.toFixed(2)};`;
 
     const hasFirstAppliedLog = rows.some(
       (row) => row && typeof row.message === "string" && row.message.includes(firstAppliedSignature),
@@ -695,7 +695,7 @@ async function runUpdateBudgetWorkflowCheck() {
       elapsedMs: Date.now() - started,
       detail:
         `projected=${projectedCost.toFixed(2)}, firstCap=${firstAppliedCap.toFixed(2)}, `
-        + `secondCap=${secondAppliedCap.toFixed(2)}, afterFirst=${afterFirstCap.toFixed(2)}, afterSecond=${afterSecondCap.toFixed(2)}`,
+        + `secondCap=${secondAppliedCap.toFixed(2)} (expected reject), afterFirst=${afterFirstCap.toFixed(2)}, afterSecond=${afterSecondCap.toFixed(2)}`,
     };
   } catch (error) {
     return fail(error instanceof Error ? error.message : String(error));

@@ -339,10 +339,12 @@ def process_update_budget(user_id: int, body: dict[str, Any]) -> tuple[dict[str,
 
     forecast, projected_monthly_spend = run_forecast(user_id, uid, profile_id)
 
-    accepted = True
-    action = "budget_update_applied"
+    accepted = requested_budget_cap >= projected_monthly_spend
+    action = "budget_update_applied" if accepted else "budget_update_rejected"
 
-    budget_data = update_budget_cap(user_id, requested_budget_cap)
+    budget_data: Optional[dict[str, Any]] = None
+    if accepted:
+        budget_data = update_budget_cap(user_id, requested_budget_cap)
 
     history_ack = publish_budget_update_event(
         uid=uid,
@@ -354,6 +356,11 @@ def process_update_budget(user_id: int, body: dict[str, Any]) -> tuple[dict[str,
     message = (
         f"Budget update applied. New budget cap ${requested_budget_cap:.2f}. "
         f"Current projected spend is ${projected_monthly_spend:.2f}."
+        if accepted
+        else (
+            f"Budget update rejected. Requested cap ${requested_budget_cap:.2f} is below "
+            f"projected month-end spend ${projected_monthly_spend:.2f}."
+        )
     )
 
     payload: dict[str, Any] = {
@@ -369,7 +376,8 @@ def process_update_budget(user_id: int, body: dict[str, Any]) -> tuple[dict[str,
         "history": history_ack,
     }
 
-    payload["budget"] = budget_data
+    if budget_data is not None:
+        payload["budget"] = budget_data
 
     return payload, 200
 

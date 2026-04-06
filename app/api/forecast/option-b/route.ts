@@ -47,6 +47,7 @@ type RecommendationSnapshot = {
 
 const OPTION_B_STABILITY_BUFFER_SGD = 1.0;
 const OPTION_B_STABILITY_RATIO_DELTA = 0.015;
+const OPTION_TARGET_RATIO = 0.8;
 
 function parsePositiveInteger(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -127,11 +128,11 @@ function deriveStabilizedCap(recommendation: RecommendationSnapshot | null): num
 
   const baseRatio =
     targetSafetyThresholdRatio !== null && targetSafetyThresholdRatio > 0
-      ? targetSafetyThresholdRatio
-      : safeThresholdRatio;
+      ? Math.min(targetSafetyThresholdRatio, OPTION_TARGET_RATIO)
+      : OPTION_TARGET_RATIO;
   const stabilityRatio = Math.max(
     0.7,
-    Math.min(baseRatio, safeThresholdRatio - OPTION_B_STABILITY_RATIO_DELTA),
+    Math.min(baseRatio, safeThresholdRatio - OPTION_B_STABILITY_RATIO_DELTA, OPTION_TARGET_RATIO),
   );
 
   const capFromProjection =

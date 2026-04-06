@@ -46,6 +46,7 @@ type CalculateBillStatePayload = {
 type ForecastRecommendationPayload = {
   currentRiskLevel?: "SAFE" | "HIGH" | "CRITICAL";
   predictedRiskLevel?: "SAFE" | "HIGH" | "CRITICAL";
+  currentProjectedCost?: number;
   recommendedDurationMinutes?: number;
   target?: {
     requiredSavingsForSafeSgd?: number;
@@ -164,6 +165,7 @@ export default function App() {
   const [applyingAllActions, setApplyingAllActions] = useState(false);
   const [applyingOptionA, setApplyingOptionA] = useState(false);
   const [applyingOptionB, setApplyingOptionB] = useState(false);
+  const [optionBModeActive, setOptionBModeActive] = useState(false);
   const [restoringActionId, setRestoringActionId] = useState<string | null>(null);
   const [restoringAllActions, setRestoringAllActions] = useState(false);
   const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -599,7 +601,8 @@ export default function App() {
         body: JSON.stringify({
           uid: DEMO_UID,
           userId: Number(data?.budget?.user_id ?? 1),
-          restoreOverrides: true,
+          budgetCap: Number(resolvedBudgetCap.toFixed(2)),
+          restoreOverrides: hasActiveOffOverrides,
         }),
       });
 
@@ -727,6 +730,7 @@ export default function App() {
           message: `Option B applied successfully with ${appliedCount} mitigation action(s).`,
         });
       }
+      setOptionBModeActive(true);
 
       setData((prev) => {
         if (!prev?.budget) {
@@ -836,10 +840,8 @@ export default function App() {
       }
 
       await fetchDashboardData(true);
-      setActionFeedback({
-        type: 'success',
-        message: `Turned back ON: ${restoredNames.join(', ')}.`,
-      });
+      setOptionBModeActive(false);
+      window.location.reload();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to turn appliances ON';
       setActionFeedback({ type: 'error', message });
@@ -958,6 +960,7 @@ export default function App() {
       .filter((appliance) => appliance?.manualOverride?.active && appliance?.state?.toUpperCase() === 'OFF')
       .map((appliance) => appliance.name)
       .filter((name) => Boolean(name)) ?? [];
+  const hasActiveOffOverrides = activeOffOverrideNames.length > 0;
   const reactivationItems: ReactivationItem[] =
     (data?.appliances ?? [])
       .filter((appliance) => appliance?.manualOverride?.active && appliance?.state?.toUpperCase() === 'OFF')
@@ -975,9 +978,7 @@ export default function App() {
   const safeMinimumBudgetCap = Number(
     forecastRecommendation?.target?.safeMinimumBudgetCap ?? 0,
   );
-  const targetSafetyThresholdRatio = Number(
-    forecastRecommendation?.target?.targetSafetyThresholdRatio ?? 0.82,
-  );
+  const targetSafetyThresholdRatio = 0.8;
   const feasibilityStatus = forecastRecommendation?.target?.feasibilityStatus;
   const feasibilityRangeLow = Number(
     forecastRecommendation?.target?.recommendedBudgetCapRange?.low ?? 0,
@@ -1005,18 +1006,41 @@ export default function App() {
         : `$${feasibilityRangeLow.toFixed(2)} to $${feasibilityRangeHigh.toFixed(2)}`
       : 'Unavailable';
   const optionABudgetCap = (() => {
+    const projected = Number(
+      forecastRecommendation?.currentProjectedCost ?? forecast?.projectedCost ?? 0,
+    );
+    const currentCap = Number(budget?.budget_cap ?? 0);
+
+    let baselineCap = 0;
+    const bufferedCap =
+      Number.isFinite(projected) && projected > 0 && targetSafetyThresholdRatio > 0
+        ? Number(((projected + 0.01) / targetSafetyThresholdRatio).toFixed(2))
+        : 0;
+
     if (Number.isFinite(safeMinimumBudgetCap) && safeMinimumBudgetCap > 0) {
-      return safeMinimumBudgetCap;
+      baselineCap = bufferedCap > 0 ? Math.max(safeMinimumBudgetCap, bufferedCap) : safeMinimumBudgetCap;
     }
 
-    const projected = Number(forecast?.projectedCost ?? 0);
-    if (Number.isFinite(projected) && projected > 0 && safeThresholdRatio > 0) {
-      return Number(((projected + 0.01) / safeThresholdRatio).toFixed(2));
+    if (baselineCap <= 0 && bufferedCap > 0) {
+      baselineCap = bufferedCap;
     }
 
-    return 0;
+    if (baselineCap <= 0 && Number.isFinite(projected) && projected > 0 && safeThresholdRatio > 0) {
+      baselineCap = Number(((projected + 0.01) / safeThresholdRatio).toFixed(2));
+    }
+
+    if (activeOffOverrideNames.length > 0 && Number.isFinite(currentCap) && currentCap > 0) {
+      baselineCap = Math.max(baselineCap, currentCap + OPTION_B_MIN_CAP_DELTA_SGD);
+    }
+
+    return Number(Math.max(0, baselineCap).toFixed(2));
   })();
   const optionBBudgetCap = (() => {
+    const optionBTargetRatio =
+      Number.isFinite(targetSafetyThresholdRatio) && targetSafetyThresholdRatio > 0
+        ? targetSafetyThresholdRatio
+        : safeThresholdRatio;
+
     const normalizeLeanCap = (candidate: number) => {
       if (!Number.isFinite(candidate) || candidate <= 0) {
         return 0;
@@ -1036,8 +1060,8 @@ export default function App() {
       plannedMitigationSavings,
       Number.isFinite(conservativePotentialSavings) ? conservativePotentialSavings : 0,
     );
-    if (projectedCost > 0 && safeThresholdRatio > 0 && modeledSavings > 0) {
-      const leanCapFromMitigation = ((projectedCost - modeledSavings) + 0.01) / safeThresholdRatio;
+    if (projectedCost > 0 && optionBTargetRatio > 0 && modeledSavings > 0) {
+      const leanCapFromMitigation = ((projectedCost - modeledSavings) + 0.01) / optionBTargetRatio;
       if (Number.isFinite(leanCapFromMitigation) && leanCapFromMitigation > 0) {
         return normalizeLeanCap(leanCapFromMitigation);
       }
@@ -1426,7 +1450,11 @@ export default function App() {
                       <div className="mt-1 text-lg font-bold text-emerald-800">
                         {canApplyOptionA ? `$${optionABudgetCap.toFixed(2)}` : 'Unavailable'}
                       </div>
-                      <div className="mt-1 text-xs text-emerald-700/90">Baseline SAFE cap with appliance restore.</div>
+                      <div className="mt-1 text-xs text-emerald-700/90">
+                        {hasActiveOffOverrides
+                          ? 'Baseline SAFE cap with appliance restore.'
+                          : 'Baseline SAFE cap (all appliances already ON).'}
+                      </div>
                     </div>
                     <div className="rounded-xl border border-slate-200 bg-slate-100 p-3">
                       <div className="text-xs font-semibold uppercase tracking-wider text-slate-600">Option B</div>
@@ -1497,7 +1525,7 @@ export default function App() {
                       <div className="mt-1 text-xs leading-5 text-slate-500">
                         Option A is live-calculated. 
                       </div>
-                      {canApplyOptionA && (
+                      {!optionBModeActive && canApplyOptionA && (
                         <button
                           type="button"
                           onClick={handleApplyOptionAPlan}
@@ -1513,10 +1541,12 @@ export default function App() {
                         >
                           {applyingOptionA
                             ? 'Applying Option A'
-                            : `Option A: Restore appliances + set SAFE cap $${optionABudgetCap.toFixed(2)}`}
+                            : hasActiveOffOverrides
+                              ? `Option A: Restore appliances + set SAFE cap $${optionABudgetCap.toFixed(2)}`
+                              : `Option A: Set SAFE cap $${optionABudgetCap.toFixed(2)}`}
                         </button>
                       )}
-                      {canApplyOptionB && (
+                      {!optionBModeActive && canApplyOptionB && (
                         <button
                           type="button"
                           onClick={handleApplyOptionBPlan}
@@ -1535,9 +1565,14 @@ export default function App() {
                             : `Option B: Save cap $${optionBBudgetCap.toFixed(2)} + ${optionBActions.length} OFF action${optionBActions.length === 1 ? '' : 's'}`}
                         </button>
                       )}
-                      {!canApplyOptionB && recommendedActionItems.length > 0 && (
+                      {!optionBModeActive && !canApplyOptionB && recommendedActionItems.length > 0 && (
                         <p className="mt-2 text-xs text-amber-700">
                           Option B appears when the cap is below Option A and savings are meaningful.
+                        </p>
+                      )}
+                      {optionBModeActive && (
+                        <p className="mt-2 text-xs text-emerald-700">
+                          Temporary OFF plan is active. Turn all appliances back ON to return to default view.
                         </p>
                       )}
                       {feasibilityStatus === 'not_achievable' && (
@@ -1591,7 +1626,7 @@ export default function App() {
                             <div className="text-sm font-semibold text-emerald-800">Turn Back ON</div>
                           </div>
                         </div>
-                        {reactivationItems.length > 1 && (
+                        {reactivationItems.length > 0 && (
                           <button
                             type="button"
                             onClick={() => handleTurnOnAllAppliances(reactivationItems)}
@@ -1621,21 +1656,23 @@ export default function App() {
                                 {item.until ? ` until ${formatUtcTimestamp(item.until)}` : ''}
                               </div>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => handleTurnOnAppliance(item)}
-                              disabled={
-                                applyingOptionB ||
-                                applyingOptionA ||
-                                restoringAllActions ||
-                                restoringActionId === item.applianceId ||
-                                applyingAllActions ||
-                                applyingActionId !== null
-                              }
-                              className="shrink-0 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
-                            >
-                              {restoringAllActions || restoringActionId === item.applianceId ? 'Turning On' : 'Turn ON'}
-                            </button>
+                            {!optionBModeActive && (
+                              <button
+                                type="button"
+                                onClick={() => handleTurnOnAppliance(item)}
+                                disabled={
+                                  applyingOptionB ||
+                                  applyingOptionA ||
+                                  restoringAllActions ||
+                                  restoringActionId === item.applianceId ||
+                                  applyingAllActions ||
+                                  applyingActionId !== null
+                                }
+                                className="shrink-0 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                              >
+                                {restoringAllActions || restoringActionId === item.applianceId ? 'Turning On' : 'Turn ON'}
+                              </button>
+                            )}
                           </div>
                         ))}
                         </div>

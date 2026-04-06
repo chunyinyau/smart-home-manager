@@ -229,15 +229,25 @@ export async function POST(request: Request) {
 
     let recommendation = await getForecastRecommendation(uid).catch(() => null);
 
-    // Prefer refreshed forecast safe minimum after restore; fallback to explicit input when needed.
-    let budgetCap = parsePositiveAmount(recommendation?.target?.safeMinimumBudgetCap);
-    if (budgetCap === null) {
-      budgetCap = parsePositiveAmount(body.budgetCap);
+    // Keep Option A at or above the computed safe minimum, while honoring a higher requested cap.
+    const recommendationCap = parsePositiveAmount(recommendation?.target?.safeMinimumBudgetCap);
+    const requestedCap = parsePositiveAmount(body.budgetCap);
+
+    let budgetCap: number | null = null;
+    if (recommendationCap !== null && requestedCap !== null) {
+      budgetCap = Number(Math.max(recommendationCap, requestedCap).toFixed(2));
+    } else {
+      budgetCap = recommendationCap ?? requestedCap;
     }
 
     if (budgetCap === null && recommendation === null) {
       recommendation = await getForecastRecommendation(uid);
-      budgetCap = parsePositiveAmount(recommendation?.target?.safeMinimumBudgetCap);
+      const fallbackRecommendationCap = parsePositiveAmount(recommendation?.target?.safeMinimumBudgetCap);
+      if (fallbackRecommendationCap !== null && requestedCap !== null) {
+        budgetCap = Number(Math.max(fallbackRecommendationCap, requestedCap).toFixed(2));
+      } else {
+        budgetCap = fallbackRecommendationCap ?? requestedCap;
+      }
     }
 
     if (budgetCap === null) {
